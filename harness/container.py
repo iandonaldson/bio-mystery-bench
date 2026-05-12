@@ -1,3 +1,4 @@
+import shutil
 import uuid
 import threading
 from pathlib import Path
@@ -20,11 +21,14 @@ class Container:
         data_dir: Optional[Path],
         memory: str = "6g",
         cpus: float = 2.0,
+        artifacts_dir: Optional[Path] = None,
     ):
         self.image = image
         self.data_dir = data_dir
         self.memory = memory
         self.cpus = cpus
+        # artifacts_dir: if set, scratch contents are copied here before container removal
+        self.artifacts_dir = artifacts_dir
         self.name = f"bio-bench-{uuid.uuid4().hex[:8]}"
         self._client = docker.from_env()
         self._container: Optional[DockerContainer] = None
@@ -84,7 +88,25 @@ class Container:
 
         return result_holder.get("out", ""), result_holder.get("err", ""), result_holder.get("rc", -1)
 
+    def collect_artifacts(self) -> None:
+        """Copy everything in /workspace/scratch to artifacts_dir before container teardown."""
+        if self.artifacts_dir is None or not hasattr(self, "_scratch_dir"):
+            return
+        src = self._scratch_dir
+        if not src.exists() or not any(src.iterdir()):
+            return
+        dest = Path(self.artifacts_dir)
+        dest.mkdir(parents=True, exist_ok=True)
+        for item in src.iterdir():
+            target = dest / item.name
+            if item.is_dir():
+                shutil.copytree(item, target, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, target)
+
     def stop(self) -> None:
+        self.collect_artifacts()
+
         if self._container is not None:
             try:
                 self._container.kill()
@@ -93,7 +115,6 @@ class Container:
             self._container = None
 
         if hasattr(self, "_scratch_dir") and self._scratch_dir.exists():
-            import shutil
             shutil.rmtree(self._scratch_dir, ignore_errors=True)
 
     def __enter__(self):

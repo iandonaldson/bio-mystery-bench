@@ -154,9 +154,11 @@ class AgentRun:
             self.cache_read_tokens += step_cache
             self.cost_tracker.add(step_input, step_output, step_cache)
 
+            reasoning_text = _extract_text(response.content)
             self.logger.log("assistant", {
                 "stop_reason": response.stop_reason,
-                "content": response.content,
+                "reasoning": reasoning_text,   # human-readable text blocks
+                "content": response.content,   # full serialized blocks (includes tool_use)
                 "usage": {"input": step_input, "output": step_output, "cache_read": step_cache},
             })
 
@@ -196,8 +198,8 @@ class AgentRun:
                         result_text = _format_result(stdout, stderr, rc)
                         self.logger.log("tool_result", {
                             "command": command,
-                            "stdout_preview": stdout[:500],
-                            "stderr_preview": stderr[:200],
+                            "stdout": stdout,        # full output
+                            "stderr": stderr,
                             "returncode": rc,
                         })
 

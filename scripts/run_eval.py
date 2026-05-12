@@ -157,12 +157,14 @@ def main(dataset, model, n_attempts, problem_ids, dry_run, resume, max_cost, max
 
             console.print(f"  [bold]Attempt {attempt + 1}/{n_attempts}[/bold]")
 
+            artifacts_dir = results_path / "artifacts" / f"problem-{problem.id}_attempt-{attempt}"
             with TrajectoryLogger(results_dir, problem.id, attempt) as traj_logger:
                 with Container(
                     image=config.image_name,
                     data_dir=problem.data_dir,
                     memory=config.docker_memory,
                     cpus=config.docker_cpus,
+                    artifacts_dir=artifacts_dir,
                 ) as container:
                     run = AgentRun(
                         client=client,
