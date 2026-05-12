@@ -149,6 +149,18 @@ Docker containers are resource-limited per run:
 - Per-run timeout: 30 minutes
 - Session cost limit: $100 (overridable with `--max-cost`)
 
+## Comparing Results to Anthropic's Benchmarks
+
+Anthropic did not publish per-problem results for the 5-problem preview set. The numbers in the research article are aggregate figures across the full 99-problem benchmark:
+
+| Model | Human-solvable (76 problems) | Human-difficult (23 problems) |
+|-------|------------------------------|-------------------------------|
+| Claude Opus 4.6 | 77.4% pass@5 | 30% pass@5 |
+
+**The preview set cannot be directly compared to these figures.** Use it to validate that the harness works end-to-end. The `answer_rubric` field is publicly visible for all 5 preview problems, so you can inspect trajectories against the known correct answers to understand agent behaviour.
+
+To replicate Anthropic's published numbers you need the full 99-problem dataset (HuggingFace approval required). The `human_solvable` field lets you reproduce the human-solvable vs. human-difficult split used in the paper.
+
 ## References
 
 - [BioMysteryBench Research Article](https://www.anthropic.com/research/Evaluating-Claude-For-Bioinformatics-With-BioMysteryBench)

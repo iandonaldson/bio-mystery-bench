@@ -35,6 +35,19 @@ The article does not publish the harness code. This repository is a faithful rec
 
 ---
 
+## Comparison with Anthropic's Published Results
+
+Anthropic did not publish per-problem results for the 5-problem preview set. All numbers in the research article refer to the full 99-problem benchmark in aggregate:
+
+- Claude Opus 4.6: 77.4% pass@5 on human-solvable problems; 86% of those solved 4+/5 times
+- Claude Opus 4.6: 30% pass@5 on human-difficult problems (the 23 problems no human expert solved)
+
+**There is no published baseline to compare against at the preview level.** The preview dataset is best used for end-to-end validation of the harness — confirming that the container, agent loop, and scorer work correctly — rather than for benchmarking against Anthropic's numbers.
+
+Once you have access to the full 99-problem dataset, you can compare aggregate pass@1 and pass@5 figures against the published results. The `human_solvable` field makes it straightforward to replicate the human-solvable vs. human-difficult split used in the paper.
+
+**One useful property of the preview:** The `answer_rubric` field (the correct answer) is publicly visible for all 5 problems. After running the harness, you can inspect each trajectory alongside the known correct answer to understand where the agent succeeded or failed — making the preview a good calibration tool even without a per-problem published baseline.
+
 ## Datasets
 
 | Split | Problems | Size | Access |
