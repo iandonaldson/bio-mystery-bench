@@ -19,7 +19,7 @@ BASH_TOOL = {
         "Execute a bash command in the bioinformatics sandbox container. "
         "You have internet access to NCBI, Ensembl, UniProt, and other biological databases. "
         "Pre-installed tools: samtools, bcftools, bedtools, biopython, scanpy, anndata, "
-        "pandas, numpy, scipy, scikit-learn, pysam, STAR, bowtie2, hisat2, "
+        "pandas, numpy, scipy, scikit-learn, pysam, salmon, kallisto, STAR, bowtie2, hisat2, "
         "R (with DESeq2, edgeR, limma, ggplot2, dplyr), pip, conda/micromamba. "
         "Working directory: /workspace. Problem data: /workspace/data/ (read-only). "
         "Write intermediate files to /workspace/scratch/. "
@@ -38,10 +38,67 @@ BASH_TOOL = {
     },
 }
 
+ABORT_TOOL = {
+    "name": "abort",
+    "description": (
+        "Abort this attempt because the available compute resources are insufficient to solve "
+        "the problem correctly. Call this instead of proceeding with an analysis you know will "
+        "fail or produce unreliable results due to memory, disk, or CPU constraints. "
+        "Provide honest estimates of what would be required."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": "One-sentence explanation of why resources are insufficient.",
+            },
+            "required_ram_gb": {
+                "type": "number",
+                "description": "Estimated RAM in GB needed to complete the analysis reliably.",
+            },
+            "required_disk_gb": {
+                "type": "number",
+                "description": "Estimated scratch disk in GB needed (excluding the input data).",
+            },
+            "required_cpus": {
+                "type": "integer",
+                "description": "Minimum number of CPU cores recommended.",
+            },
+            "explanation": {
+                "type": "string",
+                "description": (
+                    "Detailed explanation: which step requires the resources, "
+                    "what tool or data size drives the requirement, "
+                    "and whether a lower-resource alternative exists but was ruled out."
+                ),
+            },
+        },
+        "required": ["reason", "required_ram_gb", "required_disk_gb", "required_cpus", "explanation"],
+    },
+}
+
+# Commands run before the agent starts — logged and injected as environment context
+RESOURCE_CHECK_CMD = """\
+echo "=== CPU ===" && nproc && \
+echo "=== RAM (MB) ===" && free -m && \
+echo "=== DISK (scratch) ===" && df -h /workspace/scratch && \
+echo "=== DISK (data) ===" && df -h /workspace/data 2>/dev/null || df -h /workspace
+"""
+
+
+@dataclass
+class ResourceEstimate:
+    reason: str = ""
+    required_ram_gb: float = 0.0
+    required_disk_gb: float = 0.0
+    required_cpus: int = 0
+    explanation: str = ""
+
 
 @dataclass
 class AgentResult:
-    status: str                    # success | max_steps | timeout | token_limit | error
+    status: str                    # success | max_steps | timeout | token_limit | resource_abort | error
     final_message: str = ""
     steps: int = 0
     input_tokens: int = 0
@@ -49,6 +106,7 @@ class AgentResult:
     cache_read_tokens: int = 0
     wall_seconds: float = 0.0
     error: str = ""
+    resource_estimate: ResourceEstimate | None = None
 
 
 class AgentRun:
@@ -92,23 +150,25 @@ class AgentRun:
             timer.cancel()
 
     def _loop(self, start: float, timed_out: threading.Event) -> AgentResult:
-        # Initial user message with the problem question
+        # Snapshot the container's resources before the agent starts
+        env_context = self._get_environment_context()
+
+        # Build the initial user message: resource snapshot + problem question
         self.messages = [
             {
                 "role": "user",
                 "content": [
                     {
                         "type": "text",
-                        "text": self.question,
-                        # Cache the question — same across all N attempts of this problem
+                        "text": env_context + "\n\n---\n\n" + self.question,
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
             }
         ]
-        self.logger.log("user", {"question": self.question})
+        self.logger.log("user", {"environment": env_context, "question": self.question})
 
-        # System prompt with cache_control — identical across attempts
+        # System prompt — identical across all attempts of this problem
         system_with_cache = [
             {
                 "type": "text",
@@ -130,7 +190,7 @@ class AgentRun:
                     max_tokens=self.config.max_tokens_per_step,
                     system=system_with_cache,
                     messages=self.messages,
-                    tools=[BASH_TOOL],
+                    tools=[BASH_TOOL, ABORT_TOOL],
                 )
             except Exception as e:
                 self.logger.log("error", {"error": str(e)})
@@ -157,8 +217,8 @@ class AgentRun:
             reasoning_text = _extract_text(response.content)
             self.logger.log("assistant", {
                 "stop_reason": response.stop_reason,
-                "reasoning": reasoning_text,   # human-readable text blocks
-                "content": response.content,   # full serialized blocks (includes tool_use)
+                "reasoning": reasoning_text,
+                "content": response.content,
                 "usage": {"input": step_input, "output": step_output, "cache_read": step_cache},
             })
 
@@ -180,8 +240,24 @@ class AgentRun:
 
             if response.stop_reason == "tool_use":
                 tool_results = []
+                abort_result = None
+
                 for block in response.content:
-                    if hasattr(block, "type") and block.type == "tool_use" and block.name == "bash":
+                    if not (hasattr(block, "type") and block.type == "tool_use"):
+                        continue
+
+                    if block.name == "abort":
+                        abort_result = _handle_abort(block.input, self.logger, start, self)
+                        # Acknowledge so the conversation is well-formed, then return
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": "Abort acknowledged. Terminating run.",
+                        })
+                        self.messages.append({"role": "user", "content": tool_results})
+                        return abort_result
+
+                    if block.name == "bash":
                         command = block.input.get("command", "")
                         self.logger.log("tool_call", {"command": command})
 
@@ -198,7 +274,7 @@ class AgentRun:
                         result_text = _format_result(stdout, stderr, rc)
                         self.logger.log("tool_result", {
                             "command": command,
-                            "stdout": stdout,        # full output
+                            "stdout": stdout,
                             "stderr": stderr,
                             "returncode": rc,
                         })
@@ -213,8 +289,18 @@ class AgentRun:
                 if tool_results:
                     self.messages.append({"role": "user", "content": tool_results})
 
-        # unreachable
-        return self._result("error", start)
+        return self._result("error", start)  # unreachable
+
+    def _get_environment_context(self) -> str:
+        """Run resource-check commands in the container and return formatted output."""
+        try:
+            stdout, stderr, rc = self.container.exec_command(RESOURCE_CHECK_CMD, timeout=15)
+            output = stdout.strip() if stdout.strip() else stderr.strip()
+        except Exception as e:
+            output = f"(resource check failed: {e})"
+
+        self.logger.log("environment", {"resource_snapshot": output})
+        return f"## Container environment\n\n```\n{output}\n```"
 
     def _result(self, status: str, start: float) -> AgentResult:
         last_assistant = ""
@@ -232,6 +318,36 @@ class AgentRun:
             cache_read_tokens=self.cache_read_tokens,
             wall_seconds=time.monotonic() - start,
         )
+
+
+def _handle_abort(inputs: dict, logger: TrajectoryLogger, start: float, run: "AgentRun") -> AgentResult:
+    estimate = ResourceEstimate(
+        reason=inputs.get("reason", ""),
+        required_ram_gb=inputs.get("required_ram_gb", 0.0),
+        required_disk_gb=inputs.get("required_disk_gb", 0.0),
+        required_cpus=inputs.get("required_cpus", 0),
+        explanation=inputs.get("explanation", ""),
+    )
+    logger.log("status", {
+        "status": "resource_abort",
+        "resource_estimate": {
+            "reason": estimate.reason,
+            "required_ram_gb": estimate.required_ram_gb,
+            "required_disk_gb": estimate.required_disk_gb,
+            "required_cpus": estimate.required_cpus,
+            "explanation": estimate.explanation,
+        },
+    })
+    return AgentResult(
+        status="resource_abort",
+        final_message=estimate.reason,
+        steps=run.steps,
+        input_tokens=run.input_tokens,
+        output_tokens=run.output_tokens,
+        cache_read_tokens=run.cache_read_tokens,
+        wall_seconds=time.monotonic() - start,
+        resource_estimate=estimate,
+    )
 
 
 def _extract_text(content: Any) -> str:

@@ -27,6 +27,9 @@ RUN micromamba install -y -n base \
     star=2.7.11 \
     bowtie2 \
     hisat2 \
+    salmon \
+    kallisto \
+    minimap2 \
     r-base=4.3 \
     bioconductor-deseq2 \
     bioconductor-edger \

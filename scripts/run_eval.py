@@ -182,19 +182,43 @@ def main(dataset, model, n_attempts, problem_ids, dry_run, resume, max_cost, max
             correct = score_answer(predicted, problem.answer_rubric, client)
             problem_scores[attempt] = correct
 
-            status_icon = "[green]CORRECT[/green]" if correct else "[red]WRONG[/red]"
-            console.print(
-                f"    Status: {result.status} | Steps: {result.steps} | "
-                f"Time: {result.wall_seconds:.0f}s | {status_icon}"
-            )
-            console.print(f"    Predicted: {predicted[:100]}")
-            console.print(f"    Rubric:    {problem.answer_rubric[:100]}")
+            if result.status == "resource_abort":
+                est = result.resource_estimate
+                console.print(f"    Status: [yellow]RESOURCE ABORT[/yellow] | Steps: {result.steps} | Time: {result.wall_seconds:.0f}s")
+                console.print(f"    Reason: {est.reason}")
+                console.print(f"    Required: RAM {est.required_ram_gb:.0f} GB | Disk {est.required_disk_gb:.0f} GB | CPUs {est.required_cpus}")
+                console.print(f"    {est.explanation[:200]}")
+            else:
+                status_icon = "[green]CORRECT[/green]" if correct else "[red]WRONG[/red]"
+                console.print(
+                    f"    Status: {result.status} | Steps: {result.steps} | "
+                    f"Time: {result.wall_seconds:.0f}s | {status_icon}"
+                )
+                console.print(f"    Predicted: {predicted[:100]}")
+                console.print(f"    Rubric:    {problem.answer_rubric[:100]}")
             console.print(f"    {cost_tracker.summary()}")
 
             # Persist scores after each attempt
+            attempt_record = {
+                "status": result.status,
+                "correct": correct,
+                "steps": result.steps,
+                "wall_seconds": round(result.wall_seconds, 1),
+            }
+            if result.resource_estimate:
+                est = result.resource_estimate
+                attempt_record["resource_estimate"] = {
+                    "reason": est.reason,
+                    "required_ram_gb": est.required_ram_gb,
+                    "required_disk_gb": est.required_disk_gb,
+                    "required_cpus": est.required_cpus,
+                    "explanation": est.explanation,
+                }
+
             all_scores[problem.id] = {
                 **compute_problem_stats(problem_scores[:attempt + 1]),
                 "attempt_scores": problem_scores,
+                "attempts": all_scores.get(problem.id, {}).get("attempts", []) + [attempt_record],
                 "question": problem.question[:200],
                 "human_solvable": problem.human_solvable,
             }
