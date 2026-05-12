@@ -19,7 +19,7 @@ load_dotenv()
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from harness.config import RunConfig
-from harness.dataset import load_problems
+from harness.dataset import load_problems, load_local_problems
 from harness.container import Container
 from harness.agent import AgentRun
 from harness.scorer import extract_final_answer, score_answer, compute_problem_stats
@@ -73,7 +73,9 @@ def ensure_docker_image(image_name: str, dockerfile_dir: Path) -> None:
               help="Directory to write results.")
 @click.option("--no-build", is_flag=True,
               help="Skip Docker image build check.")
-def main(dataset, model, n_attempts, problem_ids, dry_run, resume, max_cost, max_steps, results_dir, no_build):
+@click.option("--dataset-path", default=None,
+              help="Path to a local JSONL manifest file (overrides --dataset).")
+def main(dataset, model, n_attempts, problem_ids, dry_run, resume, max_cost, max_steps, results_dir, no_build, dataset_path):
     """Run BioMysteryBench evaluation harness."""
 
     config = RunConfig(
@@ -93,7 +95,12 @@ def main(dataset, model, n_attempts, problem_ids, dry_run, resume, max_cost, max
 
     # Load problems
     pid_list = [p.strip() for p in problem_ids.split(",")] if problem_ids else None
-    problems = load_problems(dataset, pid_list)
+    if dataset_path:
+        problems = load_local_problems(dataset_path, pid_list)
+        dataset_label = Path(dataset_path).name
+    else:
+        problems = load_problems(dataset, pid_list)
+        dataset_label = dataset
 
     if not problems:
         console.print("[red]No problems loaded. Exiting.[/red]")
@@ -103,7 +110,7 @@ def main(dataset, model, n_attempts, problem_ids, dry_run, resume, max_cost, max
     est = cost_tracker.estimate(len(problems), n_attempts)
     console.print(f"\n[bold]BioMysteryBench Evaluation[/bold]")
     console.print(f"  Model:      {model}")
-    console.print(f"  Dataset:    {dataset} ({len(problems)} problems)")
+    console.print(f"  Dataset:    {dataset_label} ({len(problems)} problems)")
     console.print(f"  Attempts:   {n_attempts} per problem")
     console.print(f"  Est. cost:  ${est:.2f} USD (with prompt caching)")
     console.print(f"  Max cost:   ${max_cost:.2f} USD\n")
@@ -226,7 +233,7 @@ def main(dataset, model, n_attempts, problem_ids, dry_run, resume, max_cost, max
                 json.dump(all_scores, f, indent=2)
 
     # Final summary
-    _print_summary(all_scores, cost_tracker, model, dataset)
+    _print_summary(all_scores, cost_tracker, model, dataset_label)
     console.print(f"\n[green]Results saved to {results_dir}/[/green]")
 
 

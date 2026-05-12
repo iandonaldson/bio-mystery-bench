@@ -46,6 +46,15 @@ Loads problems from `Anthropic/BioMysteryBench-preview` or `Anthropic/BioMystery
 via the HuggingFace `datasets` library. Extracts each problem's `data.zip` archive and
 sets `problem.data_dir` to the extracted path.
 
+### `load_local_problems(jsonl_path, problem_ids)`
+Loads problems from a local JSONL manifest file. Each line is a JSON object; `#` comment
+lines and blank lines are skipped. Required fields: `id`, `question`, `answer_rubric`.
+Optional: `allowed_domains` (list or comma-separated string), `human_solvable`
+(bool/string, defaults `true`), `data_path` (directory relative to manifest),
+`data_zip` (zip archive relative to manifest, auto-extracted). `data_path` and `data_zip`
+are mutually exclusive; `data_path` takes precedence. Raises `FileNotFoundError` if the
+manifest, `data_path`, or `data_zip` is missing; raises `ValueError` on malformed JSON.
+
 ### `_extract_data(problem_id, data_bytes)`
 Writes a zip archive to `.data-cache/<id>/data.zip` and extracts its contents to
 `.data-cache/<id>/extracted/`. Idempotent — re-running with the same problem ID
@@ -58,6 +67,7 @@ imported, ensuring all HuggingFace downloads stay within the project tree.
 **Tests:** `tests/test_dataset.py`
 - `TestProblemDataclass` — str representation, default field values
 - `TestExtractData` — directory creation, file extraction, content correctness, idempotency
+- `TestLoadLocalProblems` — minimal problem, default fields, bool/string `human_solvable`, comma-string domains, `problem_ids` filter, comment/blank skipping, `data_path` resolution, `data_zip` extraction, missing manifest/path/zip errors, invalid JSON error, multi-problem order
 - `TestHFHomeEnvVar` — confirms `HF_HOME` is set and points inside the project
 
 ---

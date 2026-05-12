@@ -69,21 +69,94 @@ python scripts/report.py
 | Preview set      | 5        | 5        | ~$9–$15   |
 | Full benchmark   | 99       | 5        | ~$180–300 |
 
+## Custom Datasets
+
+You can run the harness against your own problems without touching the HuggingFace datasets.
+
+### JSONL manifest format
+
+Create a `.jsonl` file with one JSON object per line. Lines starting with `#` and blank lines are ignored.
+
+**Required fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique identifier for the problem |
+| `question` | string | Task prompt shown to the agent |
+| `answer_rubric` | string | Correct answer / grading criterion |
+
+**Optional fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `allowed_domains` | list or comma-string | `[]` | Network domains the environment may reach |
+| `human_solvable` | bool or `"yes"`/`"no"` | `true` | Whether a human expert can solve it |
+| `data_path` | string | — | Path to a directory of data files, relative to the manifest |
+| `data_zip` | string | — | Path to a `.zip` archive; extracted automatically (mutually exclusive with `data_path`) |
+
+### Example manifest (`my_problems/problems.jsonl`)
+
+```jsonl
+# My custom bioinformatics problems
+{"id": "custom-1", "question": "The file /workspace/data/variants.vcf contains somatic variants. Which gene has the highest number of non-synonymous variants?", "answer_rubric": "TP53", "allowed_domains": ["ncbi.nlm.nih.gov"], "human_solvable": true, "data_path": "problem1_data"}
+
+{"id": "custom-2", "question": "Using the RNA-seq counts in /workspace/data/counts.csv, which gene is most significantly upregulated between conditions A and B?", "answer_rubric": "MYC", "human_solvable": false, "data_zip": "problem2_data.zip"}
+
+# Problem with no associated data files
+{"id": "custom-3", "question": "What is the reverse complement of ATCGGTA?", "answer_rubric": "TACCGAT"}
+```
+
+### Directory layout
+
+```
+my_problems/
+├── problems.jsonl          ← manifest
+├── problem1_data/          ← referenced by data_path
+│   └── variants.vcf
+└── problem2_data.zip       ← referenced by data_zip (auto-extracted)
+```
+
+All `data_path` and `data_zip` values are resolved **relative to the manifest file's directory**, so the layout is self-contained and portable.
+
+### Running with a custom dataset
+
+```bash
+python scripts/run_eval.py --dataset-path my_problems/problems.jsonl --n-attempts 1
+```
+
+You can combine `--dataset-path` with all other flags:
+
+```bash
+# Dry run to check cost
+python scripts/run_eval.py --dataset-path my_problems/problems.jsonl --dry-run
+
+# Run only specific problem IDs
+python scripts/run_eval.py --dataset-path my_problems/problems.jsonl --problem-ids custom-1,custom-3
+
+# Resume a partial run
+python scripts/run_eval.py --dataset-path my_problems/problems.jsonl --resume
+```
+
+`--dataset-path` takes precedence over `--dataset` when both are supplied.
+
+---
+
 ## CLI Options
 
 ```
 python scripts/run_eval.py [OPTIONS]
 
-  --dataset    preview|full       Dataset split (default: preview)
-  --model      MODEL              Claude model (default: claude-sonnet-4-6)
-  --n-attempts INT                Attempts per problem (default: 5)
-  --problem-ids IDS               Comma-separated IDs to run (e.g. 0,1,2)
-  --dry-run                       Estimate cost, don't run
-  --resume                        Skip already-completed attempts
-  --max-cost   FLOAT              USD limit before halting (default: 100)
-  --max-steps  INT                Agent steps per attempt (default: 30)
-  --results-dir DIR               Output directory (default: results/)
-  --no-build                      Skip Docker image check
+  --dataset      preview|full      Dataset split (default: preview)
+  --dataset-path PATH              Local JSONL manifest (overrides --dataset)
+  --model        MODEL             Claude model (default: claude-sonnet-4-6)
+  --n-attempts   INT               Attempts per problem (default: 5)
+  --problem-ids  IDS               Comma-separated IDs to run (e.g. 0,1,2)
+  --dry-run                        Estimate cost, don't run
+  --resume                         Skip already-completed attempts
+  --max-cost     FLOAT             USD limit before halting (default: 100)
+  --max-steps    INT               Agent steps per attempt (default: 30)
+  --results-dir  DIR               Output directory (default: results/)
+  --no-build                       Skip Docker image check
 ```
 
 ## Architecture

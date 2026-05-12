@@ -1,6 +1,7 @@
+import json
 import os
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -67,6 +68,83 @@ def load_problems(split: str = "preview", problem_ids: list[str] | None = None) 
         problems.append(problem)
 
     print(f"Loaded {len(problems)} problems.")
+    return problems
+
+
+def load_local_problems(jsonl_path: str | Path, problem_ids: list[str] | None = None) -> list[Problem]:
+    """Load problems from a local JSONL manifest file.
+
+    Each line must be a JSON object with at minimum:
+      id, question, answer_rubric
+
+    Optional fields:
+      allowed_domains  – list of strings, or comma-separated string (default: [])
+      human_solvable   – true/false (default: true)
+      data_path        – path to a directory of data files, resolved relative to
+                         the manifest file's directory (default: none)
+      data_zip         – path to a .zip archive, extracted automatically (default: none)
+
+    data_path and data_zip are mutually exclusive; data_path takes precedence.
+    """
+    manifest = Path(jsonl_path).expanduser().resolve()
+    if not manifest.exists():
+        raise FileNotFoundError(f"Local dataset manifest not found: {manifest}")
+
+    base_dir = manifest.parent
+    problems = []
+
+    with manifest.open(encoding="utf-8") as f:
+        for lineno, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON on line {lineno} of {manifest}: {e}") from e
+
+            pid = str(row["id"])
+            if problem_ids and pid not in problem_ids:
+                continue
+
+            allowed = row.get("allowed_domains", [])
+            if isinstance(allowed, str):
+                allowed = [d.strip() for d in allowed.split(",") if d.strip()]
+
+            human_solvable = row.get("human_solvable", True)
+            if isinstance(human_solvable, str):
+                human_solvable = human_solvable.lower() in ("yes", "true", "1")
+
+            problem = Problem(
+                id=pid,
+                question=row["question"],
+                answer_rubric=row["answer_rubric"],
+                allowed_domains=allowed,
+                human_solvable=bool(human_solvable),
+            )
+
+            # Resolve data location
+            data_path = row.get("data_path")
+            data_zip = row.get("data_zip")
+
+            if data_path:
+                resolved = (base_dir / data_path).resolve()
+                if not resolved.exists():
+                    raise FileNotFoundError(
+                        f"data_path '{data_path}' for problem '{pid}' not found at {resolved}"
+                    )
+                problem.data_dir = resolved
+            elif data_zip:
+                zip_resolved = (base_dir / data_zip).resolve()
+                if not zip_resolved.exists():
+                    raise FileNotFoundError(
+                        f"data_zip '{data_zip}' for problem '{pid}' not found at {zip_resolved}"
+                    )
+                problem.data_dir = _extract_data(pid, zip_resolved.read_bytes())
+
+            problems.append(problem)
+
+    print(f"Loaded {len(problems)} local problems from {manifest}.")
     return problems
 
 
