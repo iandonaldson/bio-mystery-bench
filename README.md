@@ -230,6 +230,39 @@ or eval on the host side.
 - Per-run timeout: 30 minutes
 - Session cost limit: $100 (overridable with `--max-cost`)
 
+## Testing
+
+The test suite covers all harness components that can be exercised without a live
+Docker daemon or Anthropic API key. Docker calls are mocked; the agent loop and
+LLM-as-judge scorer are not tested at this layer.
+
+### Running the tests
+
+```bash
+pip install -e .          # install project dependencies first
+python3 -m pytest         # run all 113 tests
+```
+
+### Test files
+
+| File | Module tested | Tests |
+|------|--------------|-------|
+| `tests/test_scorer.py` | `harness/scorer.py` | Answer extraction, exact/numeric/score pipeline, problem stats (brittle, pass@N) |
+| `tests/test_cost_tracker.py` | `harness/cost_tracker.py` | Token accumulation, cost formula with cache discount, spend-cap enforcement, pre-run estimation |
+| `tests/test_logger.py` | `harness/logger.py` | JSONL file creation, record format, sequential step numbers, resume detection |
+| `tests/test_dataset.py` | `harness/dataset.py` | Zip extraction, file content, idempotency, `HF_HOME` isolation |
+| `tests/test_agent_helpers.py` | `harness/agent.py` | `_extract_text`, `_format_result`, `_handle_abort`, tool schema definitions |
+| `tests/test_container.py` | `harness/container.py` | `exec_command`, artifact collection, scratch dir location, context manager |
+
+### What is not tested here
+
+- **Agent loop** (`AgentRun.run()`) — requires a real Anthropic API key
+- **LLM-as-judge scorer** (`_llm_judge`) — requires a real Anthropic API key
+- **Full container execution** — requires a running Docker daemon with the sandbox image built
+
+See [documents/features.md](documents/features.md) for a full description of every
+feature and its corresponding tests.
+
 ## Comparing Results to Anthropic's Benchmarks
 
 Anthropic did not publish per-problem results for the 5-problem preview set. The numbers in the research article are aggregate figures across the full 99-problem benchmark:
