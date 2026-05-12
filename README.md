@@ -189,11 +189,43 @@ and gives a quantified estimate of what would be sufficient. See
 [documents/scaling_with_azure.md](documents/scaling_with_azure.md) for recommended VM sizes
 that address common resource limits.
 
-## Laptop Safety
+## Filesystem Safety
 
-Docker containers are resource-limited per run:
-- Memory: 6 GB (adjustable via `docker_memory` in `harness/config.py`)
-- CPUs: 2 (adjustable via `docker_cpus`)
+### What is guaranteed by the hypervisor (not a prompt — hardware enforcement)
+
+Docker Desktop on Mac runs all containers inside a Linux VM (Apple Virtualization Framework).
+A container can only see directories explicitly mounted with `-v`. No matter what the agent
+runs via bash, it **cannot reach any directory on your Mac that is not in the mount list**.
+This is enforced by the hypervisor, not by software.
+
+Two directories are mounted per attempt:
+- Problem data → `/workspace/data` — **read-only** at the kernel level; cannot be modified
+- Container scratch → `/workspace/.scratch/<run-id>` — read-write, but this is a subdirectory
+  of the project that the harness creates and deletes; nothing outside the project is touched
+
+The Docker socket is not mounted inside the container, so the agent cannot start new
+containers or escalate privileges.
+
+### What the Python orchestrator writes on your Mac
+
+Every host-side write the harness makes stays inside the project directory:
+
+| Path | Contents | Cleaned up |
+|------|----------|-----------|
+| `results/` | Trajectories, scores, artifacts | Manually |
+| `.scratch/<run-id>/` | Container scratch (symlinked into container) | After each attempt |
+| `.data-cache/<id>/` | Extracted problem data archives | Manually |
+| `.hf-cache/` | HuggingFace dataset downloads | Manually |
+
+The agent cannot direct the orchestrator to write anywhere else. The only code path from
+agent output to a host action is `tool_use` → `docker exec` (runs inside the container) or
+`abort` (returns a data structure; no filesystem side-effect). There is no shell execution
+or eval on the host side.
+
+### Resource limits
+
+- Memory per container: 6 GB (adjustable via `docker_memory` in `harness/config.py`)
+- CPUs per container: 2 (adjustable via `docker_cpus`)
 - Per-command timeout: 5 minutes
 - Per-run timeout: 30 minutes
 - Session cost limit: $100 (overridable with `--max-cost`)

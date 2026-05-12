@@ -1,11 +1,14 @@
 import os
 import zipfile
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from datasets import load_dataset as hf_load_dataset
+
+# Keep all HuggingFace downloads inside the project directory
+_PROJECT_ROOT = Path(__file__).parent.parent
+os.environ.setdefault("HF_HOME", str(_PROJECT_ROOT / ".hf-cache"))
 
 
 DATASET_NAMES = {
@@ -68,8 +71,8 @@ def load_problems(split: str = "preview", problem_ids: list[str] | None = None) 
 
 
 def _extract_data(problem_id: str, data_bytes: bytes) -> Path:
-    """Extract a problem's data.zip into a persistent temp directory."""
-    base = Path(tempfile.gettempdir()) / "bio-mystery-bench-data" / problem_id
+    """Extract a problem's data.zip into a directory inside the project tree."""
+    base = _PROJECT_ROOT / ".data-cache" / problem_id
     base.mkdir(parents=True, exist_ok=True)
 
     zip_path = base / "data.zip"

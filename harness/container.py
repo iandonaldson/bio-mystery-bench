@@ -38,7 +38,8 @@ class Container:
         if self.data_dir and Path(self.data_dir).exists():
             volumes[str(self.data_dir)] = {"bind": "/workspace/data", "mode": "ro"}
 
-        scratch_dir = Path(f"/tmp/bio-bench-scratch-{self.name}")
+        # Keep scratch inside the project tree so no writes escape the project directory
+        scratch_dir = Path(".scratch") / self.name
         scratch_dir.mkdir(parents=True, exist_ok=True)
         volumes[str(scratch_dir)] = {"bind": "/workspace/scratch", "mode": "rw"}
         self._scratch_dir = scratch_dir

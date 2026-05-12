@@ -13,11 +13,10 @@ venv/
 # Results (can be large; commit selectively)
 results/
 
-# HuggingFace cache
-~/.cache/huggingface/
-
-# Extracted problem data (re-downloaded on demand)
-/tmp/bio-mystery-bench-data/
+# All runtime data kept inside the project directory
+.hf-cache/       # HuggingFace dataset downloads
+.data-cache/     # Extracted problem data archives
+.scratch/        # Container scratch dirs (cleaned up after each run)
 
 # macOS
 .DS_Store
