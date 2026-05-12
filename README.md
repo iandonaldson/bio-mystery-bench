@@ -140,6 +140,55 @@ Anything the agent writes to `/workspace/scratch/` during a run — Python scrip
 
 > **Disk note:** If the agent downloads large reference files (e.g. a chromosome FASTA) into scratch, those will appear in artifacts and can be large. Delete `results/artifacts/` freely — nothing there is needed to re-run the benchmark.
 
+## Agent Behaviour: Resource Awareness and Tool Choice
+
+### Environment snapshot
+
+At the start of every attempt, before the agent reads the problem, the harness runs a
+resource check inside the container (`free -m`, `df -h`, `nproc`) and prepends the output
+to the problem message. The agent sees its actual available RAM, free scratch disk, and CPU
+count before deciding how to proceed.
+
+### Lightweight-first tool selection
+
+The agent is instructed to prefer memory-efficient tools when available RAM is below the
+threshold for the standard heavyweight alternative:
+
+| Task | Preferred (low RAM) | Alternative (high RAM) | RAM threshold |
+|------|--------------------|-----------------------|---------------|
+| RNA-seq quantification | **salmon** (~2 GB) or **kallisto** (~4 GB) | STAR (27 GB for human genome) | 16 GB |
+| Short-read alignment | **bowtie2** (~3 GB for human) | BWA-MEM (~6 GB) | 8 GB |
+| scRNA-seq analysis | **scanpy** (streams from disk) | Seurat in R (all in RAM) | 16 GB |
+| Differential expression | **pydeseq2** or **edgeR** | DESeq2 in R | 8 GB |
+
+All of these tools are pre-installed in the Docker image. On a 16 GB Mac with a 6 GB container
+limit, the agent will use salmon or kallisto for RNA-seq quantification rather than attempting
+to build a STAR human genome index that would require 27 GB.
+
+### Aborting on insufficient resources
+
+If no lighter alternative can complete the analysis reliably, the agent can call a dedicated
+`abort` tool instead of returning a guess. An abort is recorded in `scores.json` with a
+structured resource estimate:
+
+```json
+{
+  "status": "resource_abort",
+  "resource_estimate": {
+    "reason": "STAR human genome index requires 27 GB RAM; no transcriptome reference available for salmon",
+    "required_ram_gb": 32,
+    "required_disk_gb": 40,
+    "required_cpus": 4,
+    "explanation": "..."
+  }
+}
+```
+
+This is preferable to a wrong answer: it identifies exactly which problems need a larger machine
+and gives a quantified estimate of what would be sufficient. See
+[documents/scaling_with_azure.md](documents/scaling_with_azure.md) for recommended VM sizes
+that address common resource limits.
+
 ## Laptop Safety
 
 Docker containers are resource-limited per run:
