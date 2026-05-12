@@ -1,0 +1,23 @@
+# Environment
+.env
+__pycache__/
+*.pyc
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Results (can be large; commit selectively)
+results/
+
+# HuggingFace cache
+~/.cache/huggingface/
+
+# Extracted problem data (re-downloaded on demand)
+/tmp/bio-mystery-bench-data/
+
+# macOS
+.DS_Store

@@ -1,0 +1,12 @@
+You are grading a bioinformatics benchmark answer.
+
+The expected answer (rubric) is:
+{rubric}
+
+The agent's final response was:
+{agent_answer}
+
+Does the agent's answer correctly answer the question according to the rubric?
+Consider: scientific equivalence, alternate valid representations (e.g. gene aliases, different units with correct conversion), and partial credit is NOT given — the answer is either correct or not.
+
+Reply with exactly one word: YES or NO
