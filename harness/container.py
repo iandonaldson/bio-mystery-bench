@@ -39,7 +39,8 @@ class Container:
             volumes[str(self.data_dir)] = {"bind": "/workspace/data", "mode": "ro"}
 
         # Keep scratch inside the project tree so no writes escape the project directory
-        scratch_dir = Path(".scratch") / self.name
+        # Docker requires an absolute path for bind mounts
+        scratch_dir = Path(".scratch").resolve() / self.name
         scratch_dir.mkdir(parents=True, exist_ok=True)
         volumes[str(scratch_dir)] = {"bind": "/workspace/scratch", "mode": "rw"}
         self._scratch_dir = scratch_dir
