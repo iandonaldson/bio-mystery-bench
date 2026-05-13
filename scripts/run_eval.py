@@ -68,7 +68,7 @@ def ensure_docker_image(image_name: str, dockerfile_dir: Path) -> None:
               help="Skip attempts that already have completed trajectory files.")
 @click.option("--max-cost", default=100.0, show_default=True,
               help="Maximum session cost in USD before halting.")
-@click.option("--max-steps", default=30, show_default=True,
+@click.option("--max-steps", default=RunConfig.max_steps, show_default=True,
               help="Maximum agent steps per attempt.")
 @click.option("--results-dir", default="results", show_default=True,
               help="Directory to write results.")
