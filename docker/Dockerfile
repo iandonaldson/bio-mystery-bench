@@ -39,7 +39,8 @@ RUN micromamba install -y -n base \
     && micromamba clean -afy
 
 # Python single-cell + proteomics extras
-RUN pip install --no-cache-dir \
+# Use absolute path — micromamba base env is at /opt/conda
+RUN /opt/conda/bin/pip install --no-cache-dir \
     scanpy \
     anndata \
     pydeseq2 \
