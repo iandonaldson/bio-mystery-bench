@@ -187,7 +187,7 @@ python scripts/run_eval.py [OPTIONS]
   --dry-run                        Estimate cost, don't run
   --resume                         Skip already-completed attempts
   --max-cost     FLOAT             USD limit before halting (default: 100)
-  --max-steps    INT               Agent steps per attempt (default: 30)
+  --max-steps    INT               Agent steps per attempt (default: 50)
   --results-dir  DIR               Output directory (default: results/)
   --no-build                       Skip Docker image check
 ```
