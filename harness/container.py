@@ -82,7 +82,8 @@ class Container:
         thread.join(timeout)
 
         if thread.is_alive():
-            self.stop()
+            # Keep the container alive — the timed-out exec runs in the background.
+            # Killing the container here would make all subsequent commands fail.
             raise TimeoutError(f"Command timed out after {timeout}s: {command[:80]}")
 
         if "exc" in exc_holder:

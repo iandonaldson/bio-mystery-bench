@@ -7,7 +7,7 @@ class RunConfig:
     n_attempts: int = 5
     max_steps: int = 30
     max_tokens_per_step: int = 4096
-    step_timeout_seconds: int = 300
+    step_timeout_seconds: int = 600
     run_timeout_seconds: int = 1800
     docker_memory: str = "6g"
     docker_cpus: float = 2.0
