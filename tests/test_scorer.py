@@ -9,6 +9,7 @@ from harness.scorer import (
     _exact_match,
     _numeric_match,
     _parse_number,
+    _clean_answer,
 )
 
 
@@ -52,6 +53,37 @@ class TestExtractFinalAnswer:
         text = "preamble\nFINAL ANSWER: cell type A\nsome trailing text"
         result = extract_final_answer(text)
         assert result.startswith("cell type A")
+
+
+# ---------------------------------------------------------------------------
+# _clean_answer
+# ---------------------------------------------------------------------------
+
+class TestCleanAnswer:
+    def test_strips_trailing_double_asterisk(self):
+        assert _clean_answer("Homo sapiens**") == "Homo sapiens"
+
+    def test_strips_leading_double_asterisk(self):
+        assert _clean_answer("**Homo sapiens") == "Homo sapiens"
+
+    def test_strips_bold_wrapping(self):
+        assert _clean_answer("**Homo sapiens**") == "Homo sapiens"
+
+    def test_strips_single_asterisk_italic(self):
+        assert _clean_answer("*Homo sapiens*") == "Homo sapiens"
+
+    def test_strips_underscore_bold(self):
+        assert _clean_answer("__BRCA2__") == "BRCA2"
+
+    def test_plain_text_unchanged(self):
+        assert _clean_answer("Homo sapiens") == "Homo sapiens"
+
+    def test_empty_string_unchanged(self):
+        assert _clean_answer("") == ""
+
+    def test_extract_final_answer_strips_markdown(self):
+        text = "FINAL ANSWER: Plasmodium falciparum**"
+        assert extract_final_answer(text) == "Plasmodium falciparum"
 
 
 # ---------------------------------------------------------------------------
