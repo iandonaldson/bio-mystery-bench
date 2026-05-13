@@ -24,6 +24,7 @@ from harness.container import Container
 from harness.agent import AgentRun
 from harness.scorer import extract_final_answer, score_answer, compute_problem_stats
 from harness.logger import TrajectoryLogger, is_attempt_complete
+from trajectory_to_md import convert_file
 from harness.cost_tracker import CostTracker
 
 console = Console()
@@ -183,6 +184,14 @@ def main(dataset, model, n_attempts, problem_ids, dry_run, resume, max_cost, max
                         cost_tracker=cost_tracker,
                     )
                     result = run.run()
+
+            # Convert trajectory to markdown for human review
+            traj_jsonl = Path(results_dir) / "trajectories" / f"problem-{problem.id}_attempt-{attempt}.jsonl"
+            if traj_jsonl.exists():
+                try:
+                    convert_file(traj_jsonl, None)
+                except Exception:
+                    pass
 
             # Score
             predicted = extract_final_answer(result.final_message)
