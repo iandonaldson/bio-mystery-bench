@@ -18,11 +18,12 @@ class CostTracker:
 
     @property
     def total_cost_usd(self) -> float:
-        # Cache reads are billed at ~10% of normal input cost
-        billable_input = self.total_input_tokens - self.total_cache_read_tokens
+        # The Anthropic API reports input_tokens (new, non-cached) and
+        # cache_read_input_tokens separately — they do not overlap.
+        # Cache reads are billed at ~10% of the normal input rate.
         cache_cost = (self.total_cache_read_tokens / 1_000_000) * (self.cost_per_million_input * 0.1)
         return (
-            (billable_input / 1_000_000) * self.cost_per_million_input
+            (self.total_input_tokens / 1_000_000) * self.cost_per_million_input
             + (self.total_output_tokens / 1_000_000) * self.cost_per_million_output
             + cache_cost
         )

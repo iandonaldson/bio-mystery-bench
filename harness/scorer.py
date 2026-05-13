@@ -15,12 +15,19 @@ def extract_final_answer(text: str) -> str:
     """Extract the stated final answer from the agent's last message."""
     match = FINAL_ANSWER_PATTERN.search(text)
     if match:
-        return match.group(1).strip()
+        return _clean_answer(match.group(1).strip())
     # Fall back to the last non-empty line
     for line in reversed(text.strip().splitlines()):
         line = line.strip()
         if line:
-            return line
+            return _clean_answer(line)
+    return _clean_answer(text.strip())
+
+
+def _clean_answer(text: str) -> str:
+    """Strip markdown formatting artifacts from an extracted answer."""
+    # Remove bold (**text** or __text__) and italic (*text* or _text_) markers
+    text = re.sub(r"\*{1,2}|_{1,2}", "", text)
     return text.strip()
 
 

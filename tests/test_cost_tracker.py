@@ -43,25 +43,22 @@ class TestCostTrackerTotalCost:
         assert ct.total_cost_usd == pytest.approx(15.0)
 
     def test_cache_reads_billed_at_10_percent(self):
-        # 1M cache-read tokens: billed at 10% of $3/M = $0.30
-        # 0 non-cached input, 0 output
+        # The API reports input_tokens (new) and cache_read_input_tokens separately.
+        # 1M cache-read tokens with 0 new input: billed at 10% of $3/M = $0.30
         ct = CostTracker(cost_per_million_input=3.0, cost_per_million_output=15.0)
-        ct.add(1_000_000, 0, cache_read_tokens=1_000_000)
-        # billable_input = 1M - 1M = 0 → $0 normal input cost
-        # cache_cost = 1M * 3.0 * 0.1 / 1M = $0.30
+        ct.add(0, 0, cache_read_tokens=1_000_000)
+        # input_cost = 0, cache_cost = 1M * 3.0 * 0.1 / 1M = $0.30
         assert ct.total_cost_usd == pytest.approx(0.30)
 
     def test_mixed_tokens(self):
+        # 500k new input tokens + 500k cache-read tokens + 100k output tokens
+        # (input and cache_read are disjoint — both billed separately)
         ct = CostTracker(cost_per_million_input=3.0, cost_per_million_output=15.0)
-        # 500k normal input, 500k cache read, 100k output
         ct.add(500_000, 100_000, cache_read_tokens=500_000)
-        # billable_input = 500k (non-cached portion = total - cache = 0? No:
-        # total_input = 500k, cache_read = 500k, billable = 500k - 500k = 0
-        # Wait — add() sets total_input += 500k, total_cache_read += 500k
-        # billable_input = total_input - total_cache_read = 0
-        # cache_cost = 500k * 3.0 * 0.1 / 1M = $0.15
+        # input_cost  = 500k * 3.0 / 1M = $1.50
+        # cache_cost  = 500k * 0.30 / 1M = $0.15
         # output_cost = 100k * 15.0 / 1M = $1.50
-        expected = 0.0 + 0.15 + 1.50
+        expected = 1.50 + 0.15 + 1.50
         assert ct.total_cost_usd == pytest.approx(expected)
 
 
