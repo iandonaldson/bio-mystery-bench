@@ -5,11 +5,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from datasets import load_dataset as hf_load_dataset
-
-# Keep all HuggingFace downloads inside the project directory
+# Set HF_HOME before importing datasets so the library picks up our cache path
+# at initialisation time (it reads the env var when the module is first imported).
 _PROJECT_ROOT = Path(__file__).parent.parent
 os.environ.setdefault("HF_HOME", str(_PROJECT_ROOT / ".hf-cache"))
+
+from datasets import load_dataset as hf_load_dataset
 
 
 DATASET_NAMES = {
@@ -35,7 +36,8 @@ def load_problems(split: str = "preview", problem_ids: list[str] | None = None) 
     """Load BioMysteryBench problems from HuggingFace and extract data archives."""
     dataset_name = DATASET_NAMES[split]
     print(f"Loading dataset {dataset_name} ...")
-    ds = hf_load_dataset(dataset_name, split="train")
+    # Specify data_files to avoid datasets 4.x trying to parse data.zip as parquet
+    ds = hf_load_dataset(dataset_name, data_files={"train": "*.parquet"}, split="train")
 
     problems = []
     for row in ds:
