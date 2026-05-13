@@ -39,6 +39,10 @@ def load_problems(split: str = "preview", problem_ids: list[str] | None = None) 
     # Specify data_files to avoid datasets 4.x trying to parse data.zip as parquet
     ds = hf_load_dataset(dataset_name, data_files={"train": "*.parquet"}, split="train")
 
+    # The dataset stores problem data in a repo-level data.zip (not a parquet column).
+    # Download it once and extract per-problem subdirectories.
+    per_problem_dirs = _download_and_extract_repo_data(dataset_name)
+
     problems = []
     for row in ds:
         pid = str(row["id"])
@@ -59,18 +63,76 @@ def load_problems(split: str = "preview", problem_ids: list[str] | None = None) 
             human_solvable=human_solvable,
         )
 
-        # Extract data archive if present
-        data_bytes = row.get("data") or row.get("data_zip")
-        if data_bytes is not None:
-            data_dir = _extract_data(pid, data_bytes)
-            problem.data_dir = data_dir
-        elif "data_path" in row and row["data_path"]:
-            problem.data_dir = Path(row["data_path"])
+        # Prefer repo-level data directory, fall back to parquet column (future formats)
+        if pid in per_problem_dirs:
+            problem.data_dir = per_problem_dirs[pid]
+        else:
+            data_bytes = row.get("data") or row.get("data_zip")
+            if data_bytes is not None:
+                problem.data_dir = _extract_data(pid, data_bytes)
+            elif "data_path" in row and row["data_path"]:
+                problem.data_dir = Path(row["data_path"])
 
         problems.append(problem)
 
     print(f"Loaded {len(problems)} problems.")
     return problems
+
+
+def _download_and_extract_repo_data(dataset_name: str) -> dict[str, Path]:
+    """Download the repo-level data.zip from HuggingFace and extract per-problem dirs.
+
+    The zip is structured as:
+        {problem_id}/{data_file}
+        ...
+
+    Returns a dict mapping problem_id -> extracted directory path.
+    Idempotent: skips extraction if the directory already contains files.
+    """
+    try:
+        from huggingface_hub import hf_hub_download
+        zip_path = Path(hf_hub_download(
+            repo_id=dataset_name,
+            filename="data.zip",
+            repo_type="dataset",
+        ))
+    except Exception as e:
+        print(f"Warning: could not download repo data.zip ({e}). Problems will have no data.")
+        return {}
+
+    result: dict[str, Path] = {}
+    with zipfile.ZipFile(zip_path) as zf:
+        # Collect problem IDs from top-level directory entries in the zip
+        problem_ids_in_zip: set[str] = set()
+        for name in zf.namelist():
+            parts = name.split("/")
+            if len(parts) >= 2 and parts[0]:
+                problem_ids_in_zip.add(parts[0])
+
+        for pid in problem_ids_in_zip:
+            extract_dir = _PROJECT_ROOT / ".data-cache" / pid / "extracted"
+            extract_dir.mkdir(parents=True, exist_ok=True)
+
+            # Skip if already extracted (idempotent)
+            if any(extract_dir.iterdir()):
+                result[pid] = extract_dir
+                continue
+
+            # Extract only this problem's files, stripping the leading pid/ prefix
+            prefix = f"{pid}/"
+            for name in zf.namelist():
+                if not name.startswith(prefix):
+                    continue
+                rel = name[len(prefix):]
+                if not rel:
+                    continue
+                dest = extract_dir / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(zf.read(name))
+
+            result[pid] = extract_dir
+
+    return result
 
 
 def load_local_problems(jsonl_path: str | Path, problem_ids: list[str] | None = None) -> list[Problem]:
