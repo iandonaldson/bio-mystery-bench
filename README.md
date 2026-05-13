@@ -187,7 +187,7 @@ python scripts/run_eval.py [OPTIONS]
   --dry-run                        Estimate cost, don't run
   --resume                         Skip already-completed attempts
   --max-cost     FLOAT             USD limit before halting (default: 100)
-  --max-steps    INT               Agent steps per attempt (default: 50)
+  --max-steps    INT               Agent steps per attempt (default: 100)
   --results-dir  DIR               Output directory (default: results/)
   --no-build                       Skip Docker image check
 ```
@@ -333,8 +333,8 @@ or eval on the host side.
 
 - Memory per container: 6 GB (adjustable via `docker_memory` in `harness/config.py`)
 - CPUs per container: 2 (adjustable via `docker_cpus`)
-- Per-command timeout: 5 minutes
-- Per-run timeout: 30 minutes
+- Per-command timeout: 10 minutes
+- Per-run timeout: 60 minutes
 - Session cost limit: $100 (overridable with `--max-cost`)
 
 ## Testing
