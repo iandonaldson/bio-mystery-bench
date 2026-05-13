@@ -5,10 +5,10 @@ from dataclasses import dataclass, field
 class RunConfig:
     model: str = "claude-sonnet-4-6"
     n_attempts: int = 5
-    max_steps: int = 50
+    max_steps: int = 100
     max_tokens_per_step: int = 4096
     step_timeout_seconds: int = 600
-    run_timeout_seconds: int = 1800
+    run_timeout_seconds: int = 3600
     docker_memory: str = "6g"
     docker_cpus: float = 2.0
     max_session_cost_usd: float = 100.0
