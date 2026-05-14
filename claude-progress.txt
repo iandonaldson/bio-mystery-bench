@@ -1,0 +1,53 @@
+# Agent Progress Log
+
+## Last updated
+2026-05-14 — Full 5-problem preview set completed successfully at 80% pass@1
+
+## Current status
+Harness is fully functional and producing good results. All 5 preview problems run
+end-to-end. 4/5 correct (80% pass@1) with claude-sonnet-4-6, $3.29 total cost,
+100 step limit, 60-minute timeout. The one failure (hb022) is a genuine biology
+reasoning problem on a human_solvable=False task — not a harness issue.
+
+## Active feature slice
+None — harness is stable. Next work is likely Azure scaling or additional tooling.
+
+## Completed slices
+- Docker sandbox image (bioinformatics tools, micromamba base)
+- Dataset loading from HuggingFace (preview + full splits, repo-level data.zip)
+- Container lifecycle management (start, exec, stop, scratch/artifacts)
+- ReACT agent loop with bash tool and abort tool
+- JSONL trajectory logger (write mode, one run per file)
+- Markdown trajectory converter (auto-generated after each run)
+- Cost tracker with prompt caching support
+- Scorer (exact match, numeric tolerance, LLM-as-judge)
+- run_eval.py CLI (all flags, resume, dry-run, local JSONL datasets)
+- show_problem.py utility (list, per-ID preview, data file display)
+- trajectory_to_md.py utility (single file and batch directory modes)
+- Step/context progress footer in every tool result (75%/90% warning thresholds)
+
+## Pending slices
+- Azure scaling / parallel problem execution
+- LLM provider abstraction (harness/llm.py adapter — plan in documents/planning/replace_LLM.md)
+- Critic agent (Option 3 from commit-early discussion)
+- Subagent for BLAST (Option 2 — reduces context bloat)
+- Curated bioinformatics tools (structured wrappers for BLAST, DESeq2, etc.)
+
+## Blockers / open questions for human
+- hb022 (pancreatic cancer Erastin problem) consistently wrong — agent identifies correct
+  groups but flips Erastin vs control label. Likely needs domain-specific knowledge about
+  SLC7A11 inhibition direction. human_solvable=False.
+- Full 99-problem dataset requires HuggingFace approval
+
+## Test status
+136/136 tests passing as of last run.
+
+## Notes for next agent session
+- Default config: max_steps=100, run_timeout=3600s, step_timeout=600s
+- Preview dataset: 5 problems (hb020, hb002, recqgsfxqqodhjens, hb022, hb053)
+- Results from latest run in results/scores.json and results/trajectories/
+- Trajectory files now overwrite (not append) — each file has exactly one run
+- Step-awareness footer added to system prompt and agent.py — working well
+- CLAUDE.md governs agent operating protocol: one branch per fix, tests before commit, PR before next slice
+- Docker image: bio-mystery-bench:latest (~4GB, cached locally)
+- All fixes applied via PRs #1-#12; all merged to main
