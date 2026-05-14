@@ -5,8 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import anthropic
-
+from .llm import Provider, LLMResponse
 from .config import RunConfig
 from .container import Container
 from .logger import TrajectoryLogger
@@ -112,7 +111,7 @@ class AgentResult:
 class AgentRun:
     def __init__(
         self,
-        client: anthropic.Anthropic,
+        client: Provider,
         container: Container,
         problem_question: str,
         system_prompt: str,
@@ -168,15 +167,6 @@ class AgentRun:
         ]
         self.logger.log("user", {"environment": env_context, "question": self.question})
 
-        # System prompt — identical across all attempts of this problem
-        system_with_cache = [
-            {
-                "type": "text",
-                "text": self.system_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
-
         while True:
             if timed_out.is_set():
                 return self._result("timeout", start)
@@ -185,12 +175,12 @@ class AgentRun:
                 return self._result("max_steps", start)
 
             try:
-                response = self.client.messages.create(
+                response = self.client.chat(
                     model=self.config.model,
-                    max_tokens=self.config.max_tokens_per_step,
-                    system=system_with_cache,
+                    system=self.system_prompt,
                     messages=self.messages,
                     tools=[BASH_TOOL, ABORT_TOOL],
+                    max_tokens=self.config.max_tokens_per_step,
                 )
             except Exception as e:
                 self.logger.log("error", {"error": str(e)})
@@ -204,33 +194,30 @@ class AgentRun:
                     error=str(e),
                 )
 
-            usage = response.usage
-            step_input = usage.input_tokens
-            step_output = usage.output_tokens
-            step_cache = getattr(usage, "cache_read_input_tokens", 0) or 0
+            step_input = response.usage.input_tokens
+            step_output = response.usage.output_tokens
+            step_cache = response.usage.cache_read_tokens
 
             self.input_tokens += step_input
             self.output_tokens += step_output
             self.cache_read_tokens += step_cache
             self.cost_tracker.add(step_input, step_output, step_cache)
 
-            reasoning_text = _extract_text(response.content)
             self.logger.log("assistant", {
                 "stop_reason": response.stop_reason,
-                "reasoning": reasoning_text,
-                "content": response.content,
+                "reasoning": response.text,
+                "content": response.raw_content,
                 "usage": {"input": step_input, "output": step_output, "cache_read": step_cache},
             })
 
-            self.messages.append({"role": "assistant", "content": response.content})
+            self.messages.append({"role": "assistant", "content": response.raw_content})
             self.steps += 1
 
             if response.stop_reason == "end_turn":
-                final_text = _extract_text(response.content)
-                self.logger.log("status", {"status": "success", "final_message": final_text})
+                self.logger.log("status", {"status": "success", "final_message": response.text})
                 return AgentResult(
                     status="success",
-                    final_message=final_text,
+                    final_message=response.text,
                     steps=self.steps,
                     input_tokens=self.input_tokens,
                     output_tokens=self.output_tokens,
@@ -240,25 +227,21 @@ class AgentRun:
 
             if response.stop_reason == "tool_use":
                 tool_results = []
-                abort_result = None
 
-                for block in response.content:
-                    if not (hasattr(block, "type") and block.type == "tool_use"):
-                        continue
-
-                    if block.name == "abort":
-                        abort_result = _handle_abort(block.input, self.logger, start, self)
+                for tool_call in response.tool_calls:
+                    if tool_call.name == "abort":
+                        abort_result = _handle_abort(tool_call.input, self.logger, start, self)
                         # Acknowledge so the conversation is well-formed, then return
                         tool_results.append({
                             "type": "tool_result",
-                            "tool_use_id": block.id,
+                            "tool_use_id": tool_call.id,
                             "content": "Abort acknowledged. Terminating run.",
                         })
                         self.messages.append({"role": "user", "content": tool_results})
                         return abort_result
 
-                    if block.name == "bash":
-                        command = block.input.get("command", "")
+                    if tool_call.name == "bash":
+                        command = tool_call.input.get("command", "")
                         self.logger.log("tool_call", {"command": command})
 
                         try:
@@ -285,7 +268,7 @@ class AgentRun:
 
                         tool_results.append({
                             "type": "tool_result",
-                            "tool_use_id": block.id,
+                            "tool_use_id": tool_call.id,
                             "content": result_text,
                             "is_error": rc != 0,
                         })

@@ -1,8 +1,6 @@
 import re
 import math
-from typing import Optional
-
-import anthropic
+from typing import Any, Optional
 
 
 FINAL_ANSWER_PATTERN = re.compile(
@@ -31,7 +29,7 @@ def _clean_answer(text: str) -> str:
     return text.strip()
 
 
-def score_answer(predicted: str, rubric: str, client: Optional[anthropic.Anthropic] = None) -> bool:
+def score_answer(predicted: str, rubric: str, client: Optional[Any] = None) -> bool:
     """Return True if predicted matches the rubric."""
     # 1. Exact match (case-insensitive, stripped)
     if _exact_match(predicted, rubric):
@@ -75,7 +73,7 @@ def _parse_number(text: str) -> Optional[float]:
     return None
 
 
-def _llm_judge(predicted: str, rubric: str, client: anthropic.Anthropic) -> bool:
+def _llm_judge(predicted: str, rubric: str, client: Any) -> bool:
     prompt = (
         f"You are grading a bioinformatics answer.\n\n"
         f"Expected answer (rubric): {rubric}\n\n"
@@ -83,12 +81,25 @@ def _llm_judge(predicted: str, rubric: str, client: anthropic.Anthropic) -> bool
         "Is the student's answer correct? Reply with exactly 'YES' or 'NO'."
     )
     try:
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=10,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        verdict = response.content[0].text.strip().upper()
+        if hasattr(client, "chat"):
+            # Provider ABC path (LLMClient / harness.llm)
+            judge_model = getattr(client, "judge_model", "") or "claude-haiku-4-5-20251001"
+            response = client.chat(
+                model=judge_model,
+                system="",
+                messages=[{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+                tools=[],
+                max_tokens=10,
+            )
+            verdict = response.text.strip().upper()
+        else:
+            # Raw anthropic.Anthropic backwards-compat path
+            response = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=10,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            verdict = response.content[0].text.strip().upper()
         return verdict.startswith("YES")
     except Exception:
         return False

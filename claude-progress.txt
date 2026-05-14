@@ -1,16 +1,17 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-14 — Full 5-problem preview set completed successfully at 80% pass@1
+2026-05-14 — LLM provider abstraction layer implemented (feat-llm-adapter)
 
 ## Current status
-Harness is fully functional and producing good results. All 5 preview problems run
-end-to-end. 4/5 correct (80% pass@1) with claude-sonnet-4-6, $3.29 total cost,
-100 step limit, 60-minute timeout. The one failure (hb022) is a genuine biology
-reasoning problem on a human_solvable=False task — not a harness issue.
+Harness is fully functional with multi-provider support. The new `harness/llm.py`
+introduces an abstract `Provider` ABC with `AnthropicProvider` and `OpenAIProvider`
+subclasses. The Anthropic path is fully backwards-compatible (prompt caching preserved).
+The OpenAI path covers Ollama, Azure, Together, Groq, and any OpenAI-compatible endpoint.
+158/158 tests passing. PR open, pending merge.
 
 ## Active feature slice
-None — harness is stable. Next work is likely Azure scaling or additional tooling.
+feat-llm-adapter (in PR, pending merge)
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
@@ -25,10 +26,10 @@ None — harness is stable. Next work is likely Azure scaling or additional tool
 - show_problem.py utility (list, per-ID preview, data file display)
 - trajectory_to_md.py utility (single file and batch directory modes)
 - Step/context progress footer in every tool result (75%/90% warning thresholds)
+- LLM provider abstraction (Provider ABC, AnthropicProvider, OpenAIProvider, build_provider)
 
 ## Pending slices
 - Azure scaling / parallel problem execution
-- LLM provider abstraction (harness/llm.py adapter — plan in documents/planning/replace_LLM.md)
 - Critic agent (Option 3 from commit-early discussion)
 - Subagent for BLAST (Option 2 — reduces context bloat)
 - Curated bioinformatics tools (structured wrappers for BLAST, DESeq2, etc.)
@@ -38,16 +39,18 @@ None — harness is stable. Next work is likely Azure scaling or additional tool
   groups but flips Erastin vs control label. Likely needs domain-specific knowledge about
   SLC7A11 inhibition direction. human_solvable=False.
 - Full 99-problem dataset requires HuggingFace approval
+- Ollama smoke test requires ollama running locally with qwen2.5:14b pulled
 
 ## Test status
-136/136 tests passing as of last run.
+158/158 tests passing (136 original + 22 new adapter tests).
 
 ## Notes for next agent session
 - Default config: max_steps=100, run_timeout=3600s, step_timeout=600s
+- Provider flags: --provider anthropic|openai|ollama, --api-base-url, --api-key, --judge-model
+- Ollama example: python scripts/run_eval.py --provider ollama --model qwen2.5:14b --api-base-url http://localhost:11434/v1 --api-key ollama --judge-model qwen2.5:7b --dataset preview --problem-ids 0 --n-attempts 1
+- Anthropic prompt caching preserved: AnthropicProvider builds system_with_cache internally
+- OpenAI message format conversion: anthropic_to_openai_messages() handles cache_control stripping, tool_result extraction, tool_use → tool_calls conversion
 - Preview dataset: 5 problems (hb020, hb002, recqgsfxqqodhjens, hb022, hb053)
-- Results from latest run in results/scores.json and results/trajectories/
-- Trajectory files now overwrite (not append) — each file has exactly one run
-- Step-awareness footer added to system prompt and agent.py — working well
-- CLAUDE.md governs agent operating protocol: one branch per fix, tests before commit, PR before next slice
-- Docker image: bio-mystery-bench:latest (~4GB, cached locally)
 - All fixes applied via PRs #1-#12; all merged to main
+- Docker image: bio-mystery-bench:latest (~4GB, cached locally)
+- CLAUDE.md governs agent operating protocol: one branch per fix, tests before commit, PR before next slice

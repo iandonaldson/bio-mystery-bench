@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 import click
-import anthropic
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
@@ -26,8 +25,23 @@ from harness.scorer import extract_final_answer, score_answer, compute_problem_s
 from harness.logger import TrajectoryLogger, is_attempt_complete
 from trajectory_to_md import convert_file
 from harness.cost_tracker import CostTracker
+from harness.llm import build_provider
 
 console = Console()
+
+_API_KEY_ENV_VARS = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+}
+
+
+def _resolve_api_key(provider: str, explicit_key: str | None) -> str | None:
+    if explicit_key:
+        return explicit_key
+    if provider == "ollama":
+        return os.environ.get("OLLAMA_API_KEY", "ollama")
+    env_var = _API_KEY_ENV_VARS.get(provider, "LLM_API_KEY")
+    return os.environ.get(env_var)
 
 
 def load_system_prompt() -> str:
@@ -57,7 +71,16 @@ def ensure_docker_image(image_name: str, dockerfile_dir: Path) -> None:
 @click.option("--dataset", default="preview", type=click.Choice(["preview", "full"]), show_default=True,
               help="Dataset split to use.")
 @click.option("--model", default="claude-sonnet-4-6", show_default=True,
-              help="Claude model to use.")
+              help="Model to use for inference.")
+@click.option("--provider", default="anthropic",
+              type=click.Choice(["anthropic", "openai", "ollama"]), show_default=True,
+              help="LLM provider.")
+@click.option("--api-base-url", default=None,
+              help="Base URL for OpenAI-compatible endpoints (e.g. http://localhost:11434/v1).")
+@click.option("--api-key", default=None,
+              help="API key (overrides env var; use 'ollama' for local Ollama).")
+@click.option("--judge-model", default=None,
+              help="Model for LLM-as-judge scoring (defaults to Haiku for Anthropic, main model otherwise).")
 @click.option("--n-attempts", default=5, show_default=True,
               help="Number of attempts per problem.")
 @click.option("--problem-ids", default=None,
@@ -76,11 +99,15 @@ def ensure_docker_image(image_name: str, dockerfile_dir: Path) -> None:
               help="Skip Docker image build check.")
 @click.option("--dataset-path", default=None,
               help="Path to a local JSONL manifest file (overrides --dataset).")
-def main(dataset, model, n_attempts, problem_ids, dry_run, resume, max_cost, max_steps, results_dir, no_build, dataset_path):
+def main(dataset, model, provider, api_base_url, api_key, judge_model,
+         n_attempts, problem_ids, dry_run, resume, max_cost, max_steps,
+         results_dir, no_build, dataset_path):
     """Run BioMysteryBench evaluation harness."""
 
     config = RunConfig(
         model=model,
+        provider=provider,
+        api_base_url=api_base_url,
         n_attempts=n_attempts,
         max_steps=max_steps,
         max_session_cost_usd=max_cost,
@@ -88,9 +115,12 @@ def main(dataset, model, n_attempts, problem_ids, dry_run, resume, max_cost, max
         results_dir=results_dir,
     )
 
+    # Local models have no per-token cost
+    cost_input = 0.0 if provider == "ollama" else config.cost_per_million_input
+    cost_output = 0.0 if provider == "ollama" else config.cost_per_million_output
     cost_tracker = CostTracker(
-        cost_per_million_input=config.cost_per_million_input,
-        cost_per_million_output=config.cost_per_million_output,
+        cost_per_million_input=cost_input,
+        cost_per_million_output=cost_output,
         max_session_cost_usd=max_cost,
     )
 
@@ -124,12 +154,14 @@ def main(dataset, model, n_attempts, problem_ids, dry_run, resume, max_cost, max
         console.print("Aborted.")
         return
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        console.print("[red]ANTHROPIC_API_KEY not set in environment or .env file.[/red]")
+    resolved_key = _resolve_api_key(provider, api_key)
+    if not resolved_key:
+        env_hint = _API_KEY_ENV_VARS.get(provider, "LLM_API_KEY")
+        console.print(f"[red]No API key for provider '{provider}'. Set {env_hint} or pass --api-key.[/red]")
         sys.exit(1)
 
-    client = anthropic.Anthropic(api_key=api_key)
+    resolved_judge = judge_model or ("claude-haiku-4-5-20251001" if provider == "anthropic" else model)
+    client = build_provider(provider, resolved_key, api_base_url, resolved_judge)
     system_prompt = load_system_prompt()
 
     # Ensure Docker image exists

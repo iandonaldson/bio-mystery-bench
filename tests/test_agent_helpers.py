@@ -218,3 +218,228 @@ class TestToolDefinitions:
         assert props["required_ram_gb"]["type"] == "number"
         assert props["required_disk_gb"]["type"] == "number"
         assert props["required_cpus"]["type"] == "integer"
+
+
+# ---------------------------------------------------------------------------
+# LLM adapter (harness/llm.py)
+# ---------------------------------------------------------------------------
+
+import json as _json
+
+from harness.llm import (
+    anthropic_to_openai_messages,
+    anthropic_tool_to_openai,
+    openai_response_to_llm_response,
+    build_provider,
+    AnthropicProvider,
+    OpenAIProvider,
+    LLMToolCall,
+    LLMUsage,
+    LLMResponse,
+)
+
+
+class TestAnthropicToOpenAIMessages:
+    def test_simple_user_message_strips_cache_control(self):
+        messages = [{"role": "user", "content": [
+            {"type": "text", "text": "hello", "cache_control": {"type": "ephemeral"}}
+        ]}]
+        result = anthropic_to_openai_messages(messages, "sys")
+        assert result[0] == {"role": "system", "content": "sys"}
+        assert result[1] == {"role": "user", "content": "hello"}
+        assert "cache_control" not in str(result[1])
+
+    def test_system_injected_as_first_message(self):
+        messages = [{"role": "user", "content": [{"type": "text", "text": "q"}]}]
+        result = anthropic_to_openai_messages(messages, "SYS")
+        assert result[0]["role"] == "system"
+        assert result[0]["content"] == "SYS"
+
+    def test_empty_system_not_injected(self):
+        messages = [{"role": "user", "content": [{"type": "text", "text": "q"}]}]
+        result = anthropic_to_openai_messages(messages, "")
+        assert result[0]["role"] == "user"
+
+    def test_multiple_text_blocks_joined(self):
+        messages = [{"role": "user", "content": [
+            {"type": "text", "text": "part one"},
+            {"type": "text", "text": "part two"},
+        ]}]
+        result = anthropic_to_openai_messages(messages, "")
+        user_msg = next(m for m in result if m["role"] == "user")
+        assert "part one" in user_msg["content"]
+        assert "part two" in user_msg["content"]
+
+    def test_tool_result_in_user_becomes_separate_tool_message(self):
+        tb = MagicMock(type="tool_use", id="tu_1", input={"command": "ls"})
+        tb.name = "bash"
+        messages = [
+            {"role": "user", "content": [{"type": "text", "text": "run"}]},
+            {"role": "assistant", "content": [tb]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "tu_1", "content": "file.txt"}
+            ]},
+        ]
+        result = anthropic_to_openai_messages(messages, "")
+        roles = [m["role"] for m in result]
+        assert "tool" in roles
+        tool_msg = next(m for m in result if m["role"] == "tool")
+        assert tool_msg["tool_call_id"] == "tu_1"
+        assert tool_msg["content"] == "file.txt"
+
+    def test_assistant_with_pydantic_tool_use_block_generates_tool_calls(self):
+        # 'name' is a special MagicMock attribute; set it after construction
+        tool_block = MagicMock(type="tool_use", id="tu_42", input={"command": "pwd"})
+        tool_block.name = "bash"
+        messages = [
+            {"role": "user", "content": [{"type": "text", "text": "go"}]},
+            {"role": "assistant", "content": [tool_block]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "tu_42", "content": "ok"}
+            ]},
+        ]
+        result = anthropic_to_openai_messages(messages, "")
+        asst = next(m for m in result if m["role"] == "assistant")
+        assert "tool_calls" in asst
+        tc = asst["tool_calls"][0]
+        assert tc["id"] == "tu_42"
+        assert tc["function"]["name"] == "bash"
+        assert _json.loads(tc["function"]["arguments"]) == {"command": "pwd"}
+
+    def test_assistant_with_dict_tool_use_block_also_handled(self):
+        # openai_response_to_llm_response stores raw_content as dicts, not Pydantic
+        messages = [
+            {"role": "user", "content": [{"type": "text", "text": "go"}]},
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "tu_5", "name": "bash", "input": {"command": "echo hi"}}
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "tu_5", "content": "hi"}
+            ]},
+        ]
+        result = anthropic_to_openai_messages(messages, "")
+        asst = next(m for m in result if m["role"] == "assistant")
+        assert asst["tool_calls"][0]["id"] == "tu_5"
+
+    def test_empty_messages_returns_only_system(self):
+        result = anthropic_to_openai_messages([], "sys")
+        assert result == [{"role": "system", "content": "sys"}]
+
+    def test_empty_messages_empty_system_returns_empty_list(self):
+        result = anthropic_to_openai_messages([], "")
+        assert result == []
+
+
+class TestAnthropicToolToOpenAI:
+    def test_basic_conversion(self):
+        tool = {
+            "name": "bash",
+            "description": "run bash",
+            "input_schema": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+        }
+        result = anthropic_tool_to_openai(tool)
+        assert result["type"] == "function"
+        assert result["function"]["name"] == "bash"
+        assert result["function"]["description"] == "run bash"
+        assert result["function"]["parameters"] == tool["input_schema"]
+
+    def test_abort_tool_converts_correctly(self):
+        from harness.agent import ABORT_TOOL
+        result = anthropic_tool_to_openai(ABORT_TOOL)
+        assert result["function"]["name"] == "abort"
+        assert "required_ram_gb" in result["function"]["parameters"]["properties"]
+
+
+class TestOpenAIResponseToLLMResponse:
+    def _make_oai_response(self, finish_reason, content=None, tool_calls=None,
+                           prompt_tokens=0, completion_tokens=0):
+        msg = MagicMock()
+        msg.content = content
+        msg.tool_calls = tool_calls or []
+        choice = MagicMock()
+        choice.finish_reason = finish_reason
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        usage = MagicMock()
+        usage.prompt_tokens = prompt_tokens
+        usage.completion_tokens = completion_tokens
+        usage.prompt_tokens_details = None
+        resp.usage = usage
+        return resp
+
+    def test_finish_reason_stop_maps_to_end_turn(self):
+        resp = self._make_oai_response("stop", content="hello")
+        result = openai_response_to_llm_response(resp)
+        assert result.stop_reason == "end_turn"
+        assert result.text == "hello"
+
+    def test_finish_reason_tool_calls_maps_to_tool_use(self):
+        tc = MagicMock()
+        tc.id = "tc_1"
+        tc.function.name = "bash"
+        tc.function.arguments = '{"command":"ls"}'
+        resp = self._make_oai_response("tool_calls", tool_calls=[tc])
+        result = openai_response_to_llm_response(resp)
+        assert result.stop_reason == "tool_use"
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].id == "tc_1"
+        assert result.tool_calls[0].name == "bash"
+        assert result.tool_calls[0].input == {"command": "ls"}
+
+    def test_raw_content_contains_tool_use_dict(self):
+        tc = MagicMock()
+        tc.id = "tc_2"
+        tc.function.name = "bash"
+        tc.function.arguments = '{"command":"pwd"}'
+        resp = self._make_oai_response("tool_calls", tool_calls=[tc])
+        result = openai_response_to_llm_response(resp)
+        assert any(b.get("type") == "tool_use" for b in result.raw_content)
+        tool_block = next(b for b in result.raw_content if b.get("type") == "tool_use")
+        assert tool_block["id"] == "tc_2"
+        assert tool_block["name"] == "bash"
+
+    def test_raw_content_text_block_present_when_text(self):
+        resp = self._make_oai_response("stop", content="reasoning text")
+        result = openai_response_to_llm_response(resp)
+        assert any(b.get("type") == "text" and b.get("text") == "reasoning text"
+                   for b in result.raw_content)
+
+    def test_usage_mapped_correctly(self):
+        resp = self._make_oai_response("stop", content="hi",
+                                        prompt_tokens=100, completion_tokens=50)
+        result = openai_response_to_llm_response(resp)
+        assert result.usage.input_tokens == 100
+        assert result.usage.output_tokens == 50
+        assert result.usage.cache_read_tokens == 0
+
+    def test_no_tool_calls_gives_empty_list(self):
+        resp = self._make_oai_response("stop", content="done")
+        result = openai_response_to_llm_response(resp)
+        assert result.tool_calls == []
+
+
+class TestBuildProvider:
+    def test_anthropic_provider_returned_for_anthropic(self):
+        p = build_provider("anthropic", "fake-key")
+        assert isinstance(p, AnthropicProvider)
+
+    def test_openai_provider_returned_for_openai(self):
+        p = build_provider("openai", "fake-key")
+        assert isinstance(p, OpenAIProvider)
+
+    def test_openai_provider_returned_for_ollama(self):
+        p = build_provider("ollama", "ollama", base_url="http://localhost:11434/v1")
+        assert isinstance(p, OpenAIProvider)
+
+    def test_judge_model_set_on_provider(self):
+        p = build_provider("anthropic", "fake-key", judge_model="claude-haiku-4-5-20251001")
+        assert p.judge_model == "claude-haiku-4-5-20251001"
+
+    def test_judge_model_defaults_to_empty_string(self):
+        p = build_provider("openai", "fake-key")
+        assert p.judge_model == ""
