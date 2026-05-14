@@ -10,7 +10,7 @@ class TrajectoryLogger:
     def __init__(self, results_dir: str | Path, problem_id: str, attempt: int):
         self.path = Path(results_dir) / "trajectories" / f"problem-{problem_id}_attempt-{attempt}.jsonl"
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._file = self.path.open("a", encoding="utf-8")
+        self._file = self.path.open("w", encoding="utf-8")
         self._start = time.monotonic()
         self._step = 0
 
