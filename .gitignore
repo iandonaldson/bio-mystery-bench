@@ -12,11 +12,15 @@ venv/
 
 # Results (can be large; commit selectively)
 results/
+results_*/
 
 # All runtime data kept inside the project directory
-.hf-cache/       # HuggingFace dataset downloads
-.data-cache/     # Extracted problem data archives
-.scratch/        # Container scratch dirs (cleaned up after each run)
+# HuggingFace dataset downloads
+.hf-cache/
+# Extracted problem data archives
+.data-cache/
+# Container scratch dirs (cleaned up after each run)
+.scratch/
 
 # macOS
 .DS_Store
