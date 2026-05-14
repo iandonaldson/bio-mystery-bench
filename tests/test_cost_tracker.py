@@ -1,5 +1,6 @@
 """Tests for harness/cost_tracker.py."""
 
+import threading
 import pytest
 
 from harness.cost_tracker import CostTracker
@@ -113,3 +114,41 @@ class TestCostTrackerSummary:
         ct = CostTracker()
         ct.add(0, 0)
         assert "$" in ct.summary()
+
+
+class TestCostTrackerThreadSafety:
+    def test_concurrent_adds_accumulate_correctly(self):
+        ct = CostTracker()
+        n_threads = 20
+        tokens_per_thread = 1_000
+
+        def worker():
+            for _ in range(10):
+                ct.add(tokens_per_thread // 10, tokens_per_thread // 10)
+
+        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert ct.total_input_tokens == n_threads * tokens_per_thread
+        assert ct.total_output_tokens == n_threads * tokens_per_thread
+
+    def test_check_limit_raises_when_over_limit(self):
+        ct = CostTracker(
+            cost_per_million_input=1.0,
+            cost_per_million_output=1.0,
+            max_session_cost_usd=0.001,
+        )
+        ct.add(10_000, 0)  # 10k tokens → $0.01, well over $0.001 cap
+        with pytest.raises(RuntimeError, match="cost limit"):
+            ct.check_limit()
+
+    def test_separate_instances_do_not_share_lock(self):
+        ct1 = CostTracker()
+        ct2 = CostTracker()
+        ct1.add(100, 0)
+        ct2.add(200, 0)
+        assert ct1.total_input_tokens == 100
+        assert ct2.total_input_tokens == 200

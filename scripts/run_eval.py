@@ -5,6 +5,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import click
@@ -25,7 +27,7 @@ from harness.scorer import extract_final_answer, score_answer, compute_problem_s
 from harness.logger import TrajectoryLogger, is_attempt_complete
 from trajectory_to_md import convert_file
 from harness.cost_tracker import CostTracker
-from harness.llm import build_provider
+from harness.llm import build_provider, Provider
 
 console = Console()
 
@@ -67,6 +69,122 @@ def ensure_docker_image(image_name: str, dockerfile_dir: Path) -> None:
         console.print(f"[green]Docker image {image_name} found.[/green]")
 
 
+def _run_problem(
+    problem,
+    config: RunConfig,
+    client: Provider,
+    system_prompt: str,
+    cost_tracker: CostTracker,
+    all_scores: dict,
+    scores_lock: threading.Lock,
+    scores_file: Path,
+    results_path: Path,
+    n_attempts: int,
+    resume: bool,
+    results_dir: str,
+) -> None:
+    """Run all attempts for a single problem. Safe to call from multiple threads."""
+    pid = problem.id
+    console.print(f"\n[bold cyan]Problem {pid}[/bold cyan] (human_solvable={problem.human_solvable})")
+    console.print(f"  {problem.question[:120]}{'...' if len(problem.question) > 120 else ''}")
+
+    with scores_lock:
+        existing = all_scores.get(pid, {})
+    problem_scores: list[bool] = list(existing.get("attempt_scores", [False] * n_attempts))
+    if len(problem_scores) < n_attempts:
+        problem_scores.extend([False] * (n_attempts - len(problem_scores)))
+
+    for attempt in range(n_attempts):
+        if resume and is_attempt_complete(results_dir, pid, attempt):
+            console.print(f"  [{pid}] Attempt {attempt + 1}/{n_attempts}: skipped (already complete)")
+            continue
+
+        try:
+            cost_tracker.check_limit()
+        except RuntimeError as e:
+            console.print(f"  [{pid}] [yellow]Stopping: {e}[/yellow]")
+            break
+
+        console.print(f"  [{pid}] [bold]Attempt {attempt + 1}/{n_attempts}[/bold]")
+
+        artifacts_dir = results_path / "artifacts" / f"problem-{pid}_attempt-{attempt}"
+        with TrajectoryLogger(results_dir, pid, attempt) as traj_logger:
+            with Container(
+                image=config.image_name,
+                data_dir=problem.data_dir,
+                memory=config.docker_memory,
+                cpus=config.docker_cpus,
+                artifacts_dir=artifacts_dir,
+            ) as container:
+                run = AgentRun(
+                    client=client,
+                    container=container,
+                    problem_question=problem.question,
+                    system_prompt=system_prompt,
+                    config=config,
+                    logger=traj_logger,
+                    cost_tracker=cost_tracker,
+                )
+                result = run.run()
+
+        # Convert trajectory to markdown for human review
+        traj_jsonl = Path(results_dir) / "trajectories" / f"problem-{pid}_attempt-{attempt}.jsonl"
+        if traj_jsonl.exists():
+            try:
+                convert_file(traj_jsonl, None)
+            except Exception:
+                pass
+
+        # Score
+        predicted = extract_final_answer(result.final_message)
+        correct = score_answer(predicted, problem.answer_rubric, client)
+        problem_scores[attempt] = correct
+
+        if result.status == "resource_abort":
+            re = result.resource_estimate
+            console.print(f"  [{pid}]   Status: [yellow]RESOURCE ABORT[/yellow] | Steps: {result.steps} | Time: {result.wall_seconds:.0f}s")
+            console.print(f"  [{pid}]   Reason: {re.reason}")
+            console.print(f"  [{pid}]   Required: RAM {re.required_ram_gb:.0f} GB | Disk {re.required_disk_gb:.0f} GB | CPUs {re.required_cpus}")
+        else:
+            status_icon = "[green]CORRECT[/green]" if correct else "[red]WRONG[/red]"
+            console.print(
+                f"  [{pid}]   Status: {result.status} | Steps: {result.steps} | "
+                f"Time: {result.wall_seconds:.0f}s | {status_icon}"
+            )
+            console.print(f"  [{pid}]   Predicted: {predicted[:100]}")
+            console.print(f"  [{pid}]   Rubric:    {problem.answer_rubric[:100]}")
+        console.print(f"  [{pid}]   {cost_tracker.summary()}")
+
+        # Persist scores after each attempt (under lock to protect shared dict + file)
+        attempt_record: dict = {
+            "status": result.status,
+            "correct": correct,
+            "steps": result.steps,
+            "wall_seconds": round(result.wall_seconds, 1),
+        }
+        if result.resource_estimate:
+            re = result.resource_estimate
+            attempt_record["resource_estimate"] = {
+                "reason": re.reason,
+                "required_ram_gb": re.required_ram_gb,
+                "required_disk_gb": re.required_disk_gb,
+                "required_cpus": re.required_cpus,
+                "explanation": re.explanation,
+            }
+
+        with scores_lock:
+            existing_attempts = all_scores.get(pid, {}).get("attempts", [])
+            all_scores[pid] = {
+                **compute_problem_stats(problem_scores[:attempt + 1]),
+                "attempt_scores": problem_scores,
+                "attempts": existing_attempts + [attempt_record],
+                "question": problem.question[:200],
+                "human_solvable": problem.human_solvable,
+            }
+            with scores_file.open("w") as f:
+                json.dump(all_scores, f, indent=2)
+
+
 @click.command()
 @click.option("--dataset", default="preview", type=click.Choice(["preview", "full"]), show_default=True,
               help="Dataset split to use.")
@@ -83,6 +201,8 @@ def ensure_docker_image(image_name: str, dockerfile_dir: Path) -> None:
               help="Model for LLM-as-judge scoring (defaults to Haiku for Anthropic, main model otherwise).")
 @click.option("--n-attempts", default=5, show_default=True,
               help="Number of attempts per problem.")
+@click.option("--parallel", default=1, show_default=True,
+              help="Number of problems to run in parallel. Each problem still runs its attempts sequentially.")
 @click.option("--problem-ids", default=None,
               help="Comma-separated problem IDs to run (subset). E.g. '0,1,2'")
 @click.option("--dry-run", is_flag=True,
@@ -93,6 +213,10 @@ def ensure_docker_image(image_name: str, dockerfile_dir: Path) -> None:
               help="Maximum session cost in USD before halting.")
 @click.option("--max-steps", default=RunConfig.max_steps, show_default=True,
               help="Maximum agent steps per attempt.")
+@click.option("--docker-memory", default=RunConfig.docker_memory, show_default=True,
+              help="Memory limit per container (e.g. '6g', '28g'). Reduce when running with --parallel.")
+@click.option("--docker-cpus", default=RunConfig.docker_cpus, show_default=True,
+              help="CPU limit per container. Reduce when running with --parallel.")
 @click.option("--results-dir", default="results", show_default=True,
               help="Directory to write results.")
 @click.option("--no-build", is_flag=True,
@@ -100,8 +224,8 @@ def ensure_docker_image(image_name: str, dockerfile_dir: Path) -> None:
 @click.option("--dataset-path", default=None,
               help="Path to a local JSONL manifest file (overrides --dataset).")
 def main(dataset, model, provider, api_base_url, api_key, judge_model,
-         n_attempts, problem_ids, dry_run, resume, max_cost, max_steps,
-         results_dir, no_build, dataset_path):
+         n_attempts, parallel, problem_ids, dry_run, resume, max_cost, max_steps,
+         docker_memory, docker_cpus, results_dir, no_build, dataset_path):
     """Run BioMysteryBench evaluation harness."""
 
     config = RunConfig(
@@ -113,6 +237,8 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         max_session_cost_usd=max_cost,
         dataset_split=dataset,
         results_dir=results_dir,
+        docker_memory=docker_memory,
+        docker_cpus=docker_cpus,
     )
 
     # Local models have no per-token cost
@@ -143,6 +269,7 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
     console.print(f"  Model:      {model}")
     console.print(f"  Dataset:    {dataset_label} ({len(problems)} problems)")
     console.print(f"  Attempts:   {n_attempts} per problem")
+    console.print(f"  Parallel:   {parallel} problem(s) at a time")
     console.print(f"  Est. cost:  ${est:.2f} USD (with prompt caching)")
     console.print(f"  Max cost:   ${max_cost:.2f} USD\n")
 
@@ -172,6 +299,7 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
     results_path = Path(results_dir)
     results_path.mkdir(parents=True, exist_ok=True)
     scores_file = results_path / "scores.json"
+    scores_lock = threading.Lock()
 
     # Load existing scores for resume
     all_scores: dict[str, dict] = {}
@@ -179,99 +307,28 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         with scores_file.open() as f:
             all_scores = json.load(f)
 
-    # Outer loop: problems
-    for problem in problems:
-        console.print(f"\n[bold cyan]Problem {problem.id}[/bold cyan] (human_solvable={problem.human_solvable})")
-        console.print(f"  {problem.question[:120]}{'...' if len(problem.question) > 120 else ''}")
+    # Run problems — sequentially (parallel=1) or in a thread pool
+    kwargs = dict(
+        config=config,
+        client=client,
+        system_prompt=system_prompt,
+        cost_tracker=cost_tracker,
+        all_scores=all_scores,
+        scores_lock=scores_lock,
+        scores_file=scores_file,
+        results_path=results_path,
+        n_attempts=n_attempts,
+        resume=resume,
+        results_dir=results_dir,
+    )
 
-        problem_scores: list[bool] = all_scores.get(problem.id, {}).get("attempt_scores", [False] * n_attempts)
-        if len(problem_scores) < n_attempts:
-            problem_scores.extend([False] * (n_attempts - len(problem_scores)))
-
-        for attempt in range(n_attempts):
-            if resume and is_attempt_complete(results_dir, problem.id, attempt):
-                console.print(f"  [dim]Attempt {attempt + 1}/{n_attempts}: skipped (already complete)[/dim]")
-                continue
-
-            cost_tracker.check_limit()
-
-            console.print(f"  [bold]Attempt {attempt + 1}/{n_attempts}[/bold]")
-
-            artifacts_dir = results_path / "artifacts" / f"problem-{problem.id}_attempt-{attempt}"
-            with TrajectoryLogger(results_dir, problem.id, attempt) as traj_logger:
-                with Container(
-                    image=config.image_name,
-                    data_dir=problem.data_dir,
-                    memory=config.docker_memory,
-                    cpus=config.docker_cpus,
-                    artifacts_dir=artifacts_dir,
-                ) as container:
-                    run = AgentRun(
-                        client=client,
-                        container=container,
-                        problem_question=problem.question,
-                        system_prompt=system_prompt,
-                        config=config,
-                        logger=traj_logger,
-                        cost_tracker=cost_tracker,
-                    )
-                    result = run.run()
-
-            # Convert trajectory to markdown for human review
-            traj_jsonl = Path(results_dir) / "trajectories" / f"problem-{problem.id}_attempt-{attempt}.jsonl"
-            if traj_jsonl.exists():
-                try:
-                    convert_file(traj_jsonl, None)
-                except Exception:
-                    pass
-
-            # Score
-            predicted = extract_final_answer(result.final_message)
-            correct = score_answer(predicted, problem.answer_rubric, client)
-            problem_scores[attempt] = correct
-
-            if result.status == "resource_abort":
-                est = result.resource_estimate
-                console.print(f"    Status: [yellow]RESOURCE ABORT[/yellow] | Steps: {result.steps} | Time: {result.wall_seconds:.0f}s")
-                console.print(f"    Reason: {est.reason}")
-                console.print(f"    Required: RAM {est.required_ram_gb:.0f} GB | Disk {est.required_disk_gb:.0f} GB | CPUs {est.required_cpus}")
-                console.print(f"    {est.explanation[:200]}")
-            else:
-                status_icon = "[green]CORRECT[/green]" if correct else "[red]WRONG[/red]"
-                console.print(
-                    f"    Status: {result.status} | Steps: {result.steps} | "
-                    f"Time: {result.wall_seconds:.0f}s | {status_icon}"
-                )
-                console.print(f"    Predicted: {predicted[:100]}")
-                console.print(f"    Rubric:    {problem.answer_rubric[:100]}")
-            console.print(f"    {cost_tracker.summary()}")
-
-            # Persist scores after each attempt
-            attempt_record = {
-                "status": result.status,
-                "correct": correct,
-                "steps": result.steps,
-                "wall_seconds": round(result.wall_seconds, 1),
-            }
-            if result.resource_estimate:
-                est = result.resource_estimate
-                attempt_record["resource_estimate"] = {
-                    "reason": est.reason,
-                    "required_ram_gb": est.required_ram_gb,
-                    "required_disk_gb": est.required_disk_gb,
-                    "required_cpus": est.required_cpus,
-                    "explanation": est.explanation,
-                }
-
-            all_scores[problem.id] = {
-                **compute_problem_stats(problem_scores[:attempt + 1]),
-                "attempt_scores": problem_scores,
-                "attempts": all_scores.get(problem.id, {}).get("attempts", []) + [attempt_record],
-                "question": problem.question[:200],
-                "human_solvable": problem.human_solvable,
-            }
-            with scores_file.open("w") as f:
-                json.dump(all_scores, f, indent=2)
+    with ThreadPoolExecutor(max_workers=parallel) as executor:
+        futures = {executor.submit(_run_problem, problem, **kwargs): problem for problem in problems}
+        for future in as_completed(futures):
+            exc = future.exception()
+            if exc:
+                problem = futures[future]
+                console.print(f"[red]Problem {problem.id} raised an unexpected error: {exc}[/red]")
 
     # Final summary
     _print_summary(all_scores, cost_tracker, model, dataset_label)
