@@ -1,17 +1,17 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-14 — LLM provider abstraction layer implemented (feat-llm-adapter)
+2026-05-14 — Parallel problem execution implemented (feat-parallel)
 
 ## Current status
-Harness is fully functional with multi-provider support. The new `harness/llm.py`
-introduces an abstract `Provider` ABC with `AnthropicProvider` and `OpenAIProvider`
-subclasses. The Anthropic path is fully backwards-compatible (prompt caching preserved).
-The OpenAI path covers Ollama, Azure, Together, Groq, and any OpenAI-compatible endpoint.
-158/158 tests passing. PR open, pending merge.
+Harness supports parallel execution of benchmark problems via `--parallel N`. Each
+problem still runs its attempts sequentially; parallelism is at the problem level.
+CostTracker is now thread-safe. The `_run_problem()` function is extracted from the
+main loop, making the code easier to reason about. 161/161 tests passing. PR open,
+pending merge.
 
 ## Active feature slice
-feat-llm-adapter (in PR, pending merge)
+feat-parallel (in PR, pending merge)
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
@@ -27,9 +27,9 @@ feat-llm-adapter (in PR, pending merge)
 - trajectory_to_md.py utility (single file and batch directory modes)
 - Step/context progress footer in every tool result (75%/90% warning thresholds)
 - LLM provider abstraction (Provider ABC, AnthropicProvider, OpenAIProvider, build_provider)
+- Parallel problem execution (--parallel N, ThreadPoolExecutor, thread-safe CostTracker)
 
 ## Pending slices
-- Azure scaling / parallel problem execution
 - Critic agent (Option 3 from commit-early discussion)
 - Subagent for BLAST (Option 2 — reduces context bloat)
 - Curated bioinformatics tools (structured wrappers for BLAST, DESeq2, etc.)
@@ -39,18 +39,19 @@ feat-llm-adapter (in PR, pending merge)
   groups but flips Erastin vs control label. Likely needs domain-specific knowledge about
   SLC7A11 inhibition direction. human_solvable=False.
 - Full 99-problem dataset requires HuggingFace approval
-- Ollama smoke test requires ollama running locally with qwen2.5:14b pulled
+- Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md
 
 ## Test status
-158/158 tests passing (136 original + 22 new adapter tests).
+161/161 tests passing (158 from previous slice + 3 new thread-safety tests).
 
 ## Notes for next agent session
-- Default config: max_steps=100, run_timeout=3600s, step_timeout=600s
+- Parallel flag: --parallel N (default 1 = sequential, unchanged behaviour)
+- Tune container resources with --docker-memory and --docker-cpus when using --parallel
+  e.g. --parallel 2 --docker-memory 28g --docker-cpus 6 on a 64 GB / 16-core VM
+- Scores file writes are protected by a threading.Lock; output lines include [problem_id] prefix
+- CostTracker.add() and check_limit() are now thread-safe via internal Lock
+- cost limit hit in a thread stops that problem's remaining attempts and logs a warning
+- Per-problem output lines prefixed with [problem_id] to distinguish parallel output
 - Provider flags: --provider anthropic|openai|ollama, --api-base-url, --api-key, --judge-model
-- Ollama example: python scripts/run_eval.py --provider ollama --model qwen2.5:14b --api-base-url http://localhost:11434/v1 --api-key ollama --judge-model qwen2.5:7b --dataset preview --problem-ids 0 --n-attempts 1
-- Anthropic prompt caching preserved: AnthropicProvider builds system_with_cache internally
-- OpenAI message format conversion: anthropic_to_openai_messages() handles cache_control stripping, tool_result extraction, tool_use → tool_calls conversion
-- Preview dataset: 5 problems (hb020, hb002, recqgsfxqqodhjens, hb022, hb053)
-- All fixes applied via PRs #1-#12; all merged to main
+- All fixes applied via PRs #1-#13; all merged to main
 - Docker image: bio-mystery-bench:latest (~4GB, cached locally)
-- CLAUDE.md governs agent operating protocol: one branch per fix, tests before commit, PR before next slice

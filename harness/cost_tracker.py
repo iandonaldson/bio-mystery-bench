@@ -1,3 +1,4 @@
+import threading
 from dataclasses import dataclass, field
 
 
@@ -11,10 +12,18 @@ class CostTracker:
     total_output_tokens: int = 0
     total_cache_read_tokens: int = 0
 
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
     def add(self, input_tokens: int, output_tokens: int, cache_read_tokens: int = 0) -> None:
-        self.total_input_tokens += input_tokens
-        self.total_output_tokens += output_tokens
-        self.total_cache_read_tokens += cache_read_tokens
+        with self._lock:
+            self.total_input_tokens += input_tokens
+            self.total_output_tokens += output_tokens
+            self.total_cache_read_tokens += cache_read_tokens
 
     @property
     def total_cost_usd(self) -> float:
@@ -29,10 +38,11 @@ class CostTracker:
         )
 
     def check_limit(self) -> None:
-        if self.total_cost_usd >= self.max_session_cost_usd:
-            raise RuntimeError(
-                f"Session cost limit reached: ${self.total_cost_usd:.2f} >= ${self.max_session_cost_usd:.2f}"
-            )
+        with self._lock:
+            if self.total_cost_usd >= self.max_session_cost_usd:
+                raise RuntimeError(
+                    f"Session cost limit reached: ${self.total_cost_usd:.2f} >= ${self.max_session_cost_usd:.2f}"
+                )
 
     def estimate(self, n_problems: int, n_attempts: int, avg_input_tokens: int = 50_000, avg_output_tokens: int = 3_000) -> float:
         total_in = n_problems * n_attempts * avg_input_tokens
