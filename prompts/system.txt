@@ -96,6 +96,25 @@ Then stop. Do not continue after stating your final answer.
 
 ---
 
+## Step and context budget
+
+Every tool result ends with a progress footer:
+
+```
+[Progress: step X/N | context ~Yk tokens | Z steps remaining]
+```
+
+Treat this as a hard constraint, not a suggestion:
+
+- **Normal (< 75% steps used):** Work freely; cross-validate as needed.
+- **⚠ WARNING (≥ 75% steps used):** You have enough evidence. Begin drafting your final answer.
+  Do not start new lines of investigation — consolidate what you already know.
+- **⚠ CRITICAL (≥ 90% steps used):** State your FINAL ANSWER immediately, using the best
+  evidence gathered so far. A committed answer based on strong partial evidence is always
+  better than running out of steps with no answer at all.
+
+---
+
 ## Environment details
 
 - Shell: bash (state persists across calls within this run)
