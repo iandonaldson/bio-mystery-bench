@@ -279,6 +279,10 @@ class AgentRun:
                             "returncode": rc,
                         })
 
+                        result_text += "\n\n" + _progress_footer(
+                            self.steps, self.config.max_steps, self.input_tokens
+                        )
+
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": block.id,
@@ -362,6 +366,33 @@ def _extract_text(content: Any) -> str:
                 parts.append(block.get("text", ""))
         return "\n".join(parts)
     return str(content)
+
+
+def _progress_footer(steps_used: int, max_steps: int, input_tokens: int) -> str:
+    """Append a step-progress notice to each tool result so the agent can self-regulate."""
+    remaining = max_steps - steps_used
+    pct = steps_used / max_steps if max_steps else 1.0
+    tokens_k = input_tokens / 1000
+
+    if pct >= 0.90:
+        urgency = (
+            f"⚠ CRITICAL: only {remaining} steps remaining. "
+            "Stop all further analysis and state your FINAL ANSWER now, "
+            "even if you would prefer more validation."
+        )
+    elif pct >= 0.75:
+        urgency = (
+            f"⚠ WARNING: {remaining} steps remaining ({steps_used}/{max_steps} used). "
+            "Begin wrapping up — cross-validation is complete enough. "
+            "Prepare to state your FINAL ANSWER within the next few steps."
+        )
+    else:
+        urgency = ""
+
+    footer = f"[Progress: step {steps_used}/{max_steps} | context ~{tokens_k:.0f}k tokens | {remaining} steps remaining]"
+    if urgency:
+        footer += f"\n{urgency}"
+    return footer
 
 
 def _format_result(stdout: str, stderr: str, rc: int, max_chars: int = 8000) -> str:
