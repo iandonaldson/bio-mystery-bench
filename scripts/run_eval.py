@@ -34,6 +34,12 @@ console = Console()
 _API_KEY_ENV_VARS = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
+    "groq": "GROQ_API_KEY",
+}
+
+_DEFAULT_BASE_URLS = {
+    "groq": "https://api.groq.com/openai/v1",
+    "ollama": "http://localhost:11434/v1",
 }
 
 
@@ -191,7 +197,7 @@ def _run_problem(
 @click.option("--model", default="claude-sonnet-4-6", show_default=True,
               help="Model to use for inference.")
 @click.option("--provider", default="anthropic",
-              type=click.Choice(["anthropic", "openai", "ollama"]), show_default=True,
+              type=click.Choice(["anthropic", "openai", "ollama", "groq"]), show_default=True,
               help="LLM provider.")
 @click.option("--api-base-url", default=None,
               help="Base URL for OpenAI-compatible endpoints (e.g. http://localhost:11434/v1).")
@@ -241,6 +247,9 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         docker_cpus=docker_cpus,
     )
 
+    # Auto-resolve base URL for providers with a known default endpoint
+    resolved_base_url = api_base_url or _DEFAULT_BASE_URLS.get(provider)
+
     # Local models have no per-token cost
     cost_input = 0.0 if provider == "ollama" else config.cost_per_million_input
     cost_output = 0.0 if provider == "ollama" else config.cost_per_million_output
@@ -288,7 +297,7 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         sys.exit(1)
 
     resolved_judge = judge_model or ("claude-haiku-4-5-20251001" if provider == "anthropic" else model)
-    client = build_provider(provider, resolved_key, api_base_url, resolved_judge)
+    client = build_provider(provider, resolved_key, resolved_base_url, resolved_judge)
     system_prompt = load_system_prompt()
 
     # Ensure Docker image exists
