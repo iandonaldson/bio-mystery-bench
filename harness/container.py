@@ -102,10 +102,13 @@ class Container:
         dest.mkdir(parents=True, exist_ok=True)
         for item in src.iterdir():
             target = dest / item.name
-            if item.is_dir():
-                shutil.copytree(item, target, dirs_exist_ok=True)
-            else:
-                shutil.copy2(item, target)
+            try:
+                if item.is_dir():
+                    shutil.copytree(item, target, dirs_exist_ok=True, ignore_dangling_symlinks=True)
+                else:
+                    shutil.copy2(item, target)
+            except Exception:
+                pass
 
     def stop(self) -> None:
         self.collect_artifacts()
