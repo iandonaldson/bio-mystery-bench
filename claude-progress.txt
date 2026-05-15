@@ -1,7 +1,7 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-15 — Multi-provider runs completed; Groq + Cerebras tool call fixes shipped
+2026-05-15 — PR #19 merged (trajectory fixes + cost tracking); code walkthrough document added
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
@@ -15,6 +15,10 @@ Preview benchmark results so far:
 
 ## Active feature slice
 None — all recent slices merged.
+
+## Documentation
+- documents/code_walkthroughs/code_flow.md — end-to-end harness walkthrough (single Anthropic provider)
+- documents/code_walkthroughs/2.llm_backend_expansion.md — multi-provider LLM abstraction layer (call-order walkthrough of all changes in PRs #13–#19)
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
