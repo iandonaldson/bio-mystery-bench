@@ -167,6 +167,7 @@ def _run_problem(
             "correct": correct,
             "steps": result.steps,
             "wall_seconds": round(result.wall_seconds, 1),
+            "predicted": predicted[:300],
         }
         if result.resource_estimate:
             re = result.resource_estimate
@@ -185,6 +186,7 @@ def _run_problem(
                 "attempt_scores": problem_scores,
                 "attempts": existing_attempts + [attempt_record],
                 "question": problem.question[:200],
+                "answer_rubric": problem.answer_rubric[:300],
                 "human_solvable": problem.human_solvable,
             }
             with scores_file.open("w") as f:
@@ -345,28 +347,58 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
 
 
 def _print_summary(all_scores: dict, cost_tracker: CostTracker, model: str, dataset: str) -> None:
-    table = Table(title="BioMysteryBench Results")
-    table.add_column("Metric", style="bold")
-    table.add_column("Value")
-
     total = len(all_scores)
     if total == 0:
         return
+
+    # Per-problem detail table
+    detail = Table(title=f"BioMysteryBench — Per-Problem Results ({model})", show_lines=True)
+    detail.add_column("ID", style="bold", no_wrap=True)
+    detail.add_column("Solvable", justify="center", no_wrap=True)
+    detail.add_column("✓", justify="center", no_wrap=True)
+    detail.add_column("Steps", justify="right", no_wrap=True)
+    detail.add_column("Time", justify="right", no_wrap=True)
+    detail.add_column("Question", no_wrap=True)
+    detail.add_column("Submitted", no_wrap=True)
+    detail.add_column("Expected", no_wrap=True)
+
+    def _trunc(s: str, n: int) -> str:
+        return s if len(s) <= n else s[:n - 1] + "…"
+
+    for pid, v in all_scores.items():
+        last = v.get("attempts", [{}])[-1]
+        correct = v.get("pass_at_1", False)
+        tick = "[green]✓[/green]" if correct else "[red]✗[/red]"
+        solvable = "Y" if v.get("human_solvable") else "N"
+        steps = str(last.get("steps", "—"))
+        secs = last.get("wall_seconds")
+        time_str = f"{secs:.0f}s" if secs is not None else "—"
+        question = _trunc((v.get("question") or ""), 45)
+        predicted = _trunc((last.get("predicted") or ""), 35)
+        rubric = _trunc((v.get("answer_rubric") or ""), 35)
+        detail.add_row(pid, solvable, tick, steps, time_str, question, predicted, rubric)
+
+    console.print(detail)
+
+    # Aggregate metrics table
+    agg = Table(title="Aggregate Metrics")
+    agg.add_column("Metric", style="bold")
+    agg.add_column("Value")
 
     pass_at_1 = sum(1 for v in all_scores.values() if v.get("pass_at_1")) / total
     pass_at_n_key = [k for k in next(iter(all_scores.values()), {}) if k.startswith("pass_at_") and k != "pass_at_1"]
     pass_at_n = sum(1 for v in all_scores.values() if v.get(pass_at_n_key[0])) / total if pass_at_n_key else 0
     brittle = sum(1 for v in all_scores.values() if v.get("brittle")) / total
 
-    table.add_row("Model", model)
-    table.add_row("Dataset", dataset)
-    table.add_row("Problems", str(total))
-    table.add_row("pass@1", f"{pass_at_1:.1%}")
-    table.add_row(pass_at_n_key[0] if pass_at_n_key else "pass@N", f"{pass_at_n:.1%}")
-    table.add_row("Brittle fraction", f"{brittle:.1%}")
-    table.add_row("Total cost", f"${cost_tracker.total_cost_usd:.2f}")
+    agg.add_row("Model", model)
+    agg.add_row("Dataset", dataset)
+    agg.add_row("Problems", str(total))
+    agg.add_row("pass@1", f"{pass_at_1:.1%}")
+    agg.add_row(pass_at_n_key[0] if pass_at_n_key else "pass@N", f"{pass_at_n:.1%}")
+    agg.add_row("Brittle fraction", f"{brittle:.1%}")
+    agg.add_row("Total cost", f"${cost_tracker.total_cost_usd:.2f}")
 
-    console.print(table)
+    console.print(agg)
 
 
 if __name__ == "__main__":

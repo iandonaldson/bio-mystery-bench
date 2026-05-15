@@ -1,17 +1,20 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-14 — Parallel problem execution implemented (feat-parallel)
+2026-05-15 — Multi-provider runs completed; Groq + Cerebras tool call fixes shipped
 
 ## Current status
-Harness supports parallel execution of benchmark problems via `--parallel N`. Each
-problem still runs its attempts sequentially; parallelism is at the problem level.
-CostTracker is now thread-safe. The `_run_problem()` function is extracted from the
-main loop, making the code easier to reason about. 161/161 tests passing. PR open,
-pending merge.
+Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
+providers. Three bug-fix PRs merged: Groq named provider (#15), Llama text-format
+tool call recovery (#16), artifact copy errors silenced (#17). 168/168 tests passing.
+
+Preview benchmark results so far:
+- Claude Sonnet 4.6 (Anthropic): 80% pass@1 (from earlier run)
+- llama-3.3-70b (Groq free tier): 20% pass@1 (1/5 — rest hit 100k token/day limit)
+- Qwen3-235B-A22B (Cerebras free tier): 40% pass@1 (2/5 correct)
 
 ## Active feature slice
-feat-parallel (in PR, pending merge)
+None — all recent slices merged.
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
@@ -28,6 +31,9 @@ feat-parallel (in PR, pending merge)
 - Step/context progress footer in every tool result (75%/90% warning thresholds)
 - LLM provider abstraction (Provider ABC, AnthropicProvider, OpenAIProvider, build_provider)
 - Parallel problem execution (--parallel N, ThreadPoolExecutor, thread-safe CostTracker)
+- Groq named provider (GROQ_API_KEY env var, auto base URL)
+- Llama text-format tool call recovery (<function/bash> and <function=bash[]> patterns)
+- Artifact copy errors silenced (ignore_dangling_symlinks, try/except per item)
 
 ## Pending slices
 - Critic agent (Option 3 from commit-early discussion)
@@ -35,23 +41,22 @@ feat-parallel (in PR, pending merge)
 - Curated bioinformatics tools (structured wrappers for BLAST, DESeq2, etc.)
 
 ## Blockers / open questions for human
-- hb022 (pancreatic cancer Erastin problem) consistently wrong — agent identifies correct
-  groups but flips Erastin vs control label. Likely needs domain-specific knowledge about
-  SLC7A11 inhibition direction. human_solvable=False.
+- hb022 (pancreatic cancer sample labels) — model gets right samples but wrong format
+  (outputs "Sample01" not "Sample_01"). Scorer is strict. human_solvable=False.
 - Full 99-problem dataset requires HuggingFace approval
+- Groq Dev Tier upgrades temporarily unavailable (since ~Apr 2026, no ETA)
 - Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md
 
 ## Test status
-161/161 tests passing (158 from previous slice + 3 new thread-safety tests).
+168/168 tests passing.
 
 ## Notes for next agent session
-- Parallel flag: --parallel N (default 1 = sequential, unchanged behaviour)
-- Tune container resources with --docker-memory and --docker-cpus when using --parallel
-  e.g. --parallel 2 --docker-memory 28g --docker-cpus 6 on a 64 GB / 16-core VM
-- Scores file writes are protected by a threading.Lock; output lines include [problem_id] prefix
-- CostTracker.add() and check_limit() are now thread-safe via internal Lock
-- cost limit hit in a thread stops that problem's remaining attempts and logs a warning
-- Per-problem output lines prefixed with [problem_id] to distinguish parallel output
-- Provider flags: --provider anthropic|openai|ollama, --api-base-url, --api-key, --judge-model
-- All fixes applied via PRs #1-#13; all merged to main
+- Provider flags: --provider anthropic|openai|ollama|groq, --api-base-url, --api-key, --judge-model
+- Groq: reads GROQ_API_KEY, auto base URL https://api.groq.com/openai/v1
+- Cerebras: use --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key $CEREBRAS_API_KEY
+  Available models: qwen-3-235b-a22b-instruct-2507, llama3.1-8b, gpt-oss-120b
+- Cerebras free tier: 1M tokens/day, no rate limit issues observed yet
+- Llama text-format tool call recovery handles <function/bash> and <function=bash[]> patterns
+- Artifact copy silenced: dangling symlinks and missing scratch files no longer crash score write
+- All fixes applied via PRs #1-#17; all merged to main
 - Docker image: bio-mystery-bench:latest (~4GB, cached locally)
