@@ -42,6 +42,18 @@ _DEFAULT_BASE_URLS = {
     "ollama": "http://localhost:11434/v1",
 }
 
+# Known per-million-token costs (input, output). Models not listed default to 0.
+_MODEL_COSTS: dict[str, tuple[float, float]] = {
+    "claude-sonnet-4-6":           (3.0,   15.0),
+    "claude-opus-4-7":             (15.0,  75.0),
+    "claude-haiku-4-5-20251001":   (0.8,    4.0),
+    "llama-3.3-70b-versatile":     (0.59,   0.79),
+    "llama-3.3-70b-specdec":       (0.59,   0.79),
+    "llama-3.1-70b-versatile":     (0.59,   0.79),
+    "llama-3.1-8b-instant":        (0.05,   0.08),
+    "qwen3-32b":                   (0.29,   0.59),
+}
+
 
 def _resolve_api_key(provider: str, explicit_key: str | None) -> str | None:
     if explicit_key:
@@ -112,6 +124,7 @@ def _run_problem(
             break
 
         console.print(f"  [{pid}] [bold]Attempt {attempt + 1}/{n_attempts}[/bold]")
+        cost_before = cost_tracker.total_cost_usd
 
         artifacts_dir = results_path / "artifacts" / f"problem-{pid}_attempt-{attempt}"
         with TrajectoryLogger(results_dir, pid, attempt) as traj_logger:
@@ -168,6 +181,7 @@ def _run_problem(
             "steps": result.steps,
             "wall_seconds": round(result.wall_seconds, 1),
             "predicted": predicted[:300],
+            "cost_usd": round(cost_tracker.total_cost_usd - cost_before, 6),
         }
         if result.resource_estimate:
             re = result.resource_estimate
@@ -252,9 +266,15 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
     # Auto-resolve base URL for providers with a known default endpoint
     resolved_base_url = api_base_url or _DEFAULT_BASE_URLS.get(provider)
 
-    # Local models have no per-token cost
-    cost_input = 0.0 if provider == "ollama" else config.cost_per_million_input
-    cost_output = 0.0 if provider == "ollama" else config.cost_per_million_output
+    # Resolve per-token costs: model lookup > Anthropic config default > 0 for local/unknown
+    if provider == "ollama":
+        cost_input, cost_output = 0.0, 0.0
+    elif model in _MODEL_COSTS:
+        cost_input, cost_output = _MODEL_COSTS[model]
+    elif provider == "anthropic":
+        cost_input, cost_output = config.cost_per_million_input, config.cost_per_million_output
+    else:
+        cost_input, cost_output = 0.0, 0.0
     cost_tracker = CostTracker(
         cost_per_million_input=cost_input,
         cost_per_million_output=cost_output,
@@ -358,6 +378,7 @@ def _print_summary(all_scores: dict, cost_tracker: CostTracker, model: str, data
     detail.add_column("✓", justify="center", no_wrap=True)
     detail.add_column("Steps", justify="right", no_wrap=True)
     detail.add_column("Time", justify="right", no_wrap=True)
+    detail.add_column("Cost", justify="right", no_wrap=True)
     detail.add_column("Question", no_wrap=True)
     detail.add_column("Submitted", no_wrap=True)
     detail.add_column("Expected", no_wrap=True)
@@ -373,10 +394,12 @@ def _print_summary(all_scores: dict, cost_tracker: CostTracker, model: str, data
         steps = str(last.get("steps", "—"))
         secs = last.get("wall_seconds")
         time_str = f"{secs:.0f}s" if secs is not None else "—"
+        cost_usd = last.get("cost_usd")
+        cost_str = f"${cost_usd:.3f}" if cost_usd is not None else "—"
         question = _trunc((v.get("question") or ""), 45)
         predicted = _trunc((last.get("predicted") or ""), 35)
         rubric = _trunc((v.get("answer_rubric") or ""), 35)
-        detail.add_row(pid, solvable, tick, steps, time_str, question, predicted, rubric)
+        detail.add_row(pid, solvable, tick, steps, time_str, cost_str, question, predicted, rubric)
 
     console.print(detail)
 

@@ -15,11 +15,18 @@ import click
 
 
 def _runs_from_events(events: list[dict]) -> list[list[dict]]:
-    """Split a flat event list into per-run slices at each step-2 boundary."""
+    """Split a flat event list into per-run slices.
+
+    Only splits when a new step-2 event appears after a status event has already
+    been seen in the current slice — i.e. only when the old append-mode bug caused
+    two complete runs to be concatenated in one file. A normal single run always
+    starts with step 0/1/2 and never triggers a split.
+    """
     runs: list[list[dict]] = []
     current: list[dict] = []
     for ev in events:
-        if ev.get("step") == 2 and current:
+        already_complete = any(e.get("role") == "status" for e in current)
+        if ev.get("step") == 2 and already_complete:
             runs.append(current)
             current = []
         current.append(ev)
@@ -52,7 +59,10 @@ def _render_run(events: list[dict], run_index: int, total_runs: int) -> list[str
         data = ev.get("data", {})
 
         if role == "user":
-            content = data if isinstance(data, str) else data.get("content", "")
+            if isinstance(data, dict):
+                content = data.get("question") or data.get("content") or ""
+            else:
+                content = data if isinstance(data, str) else ""
             lines.append(f"### Step {step} — Problem statement\n")
             lines.append(f"{content}\n")
 
