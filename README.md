@@ -2,21 +2,21 @@
 
 A self-contained harness for running the [Anthropic BioMysteryBench](https://www.anthropic.com/research/Evaluating-Claude-For-Bioinformatics-With-BioMysteryBench) benchmark locally.
 
-Claude acts as a ReACT agent, autonomously executing bioinformatics analyses inside a Docker container to solve 99 expert-authored mystery problems. The harness records full trajectories and scores final answers.
+An LLM acts as a ReACT agent, autonomously executing bioinformatics analyses inside a Docker container to solve 99 expert-authored mystery problems. The harness records full trajectories and scores final answers. Multiple LLM providers are supported: Anthropic (Claude), Groq, Azure AI Foundry, Cerebras, Ollama (local), and any OpenAI-compatible endpoint.
 
 ## Quick Start
 
-### 1. Prerequisites 
+### 1. Prerequisites
 
 - **macOS** (Apple Silicon or Intel) with Docker Desktop installed and running
 - Python 3.11+
-- An Anthropic API key
+- An API key for at least one supported provider (see [LLM Providers](#llm-providers))
 
 ### 2. Install
 
 ```bash
 cd bio-mystery-bench
-cp .env.example .env        # add your ANTHROPIC_API_KEY
+cp .env.example .env        # add your API key(s)
 pip install -e .
 ```
 
@@ -83,7 +83,90 @@ python scripts/trajectory_to_md.py results/trajectories/
 python scripts/trajectory_to_md.py results/trajectories/problem-hb020_attempt-0.jsonl --out ~/Desktop/hb020.md
 ```
 
-The Markdown file lands next to the `.jsonl` source (same name, `.md` extension). Open it in any Markdown viewer — it shows each command, its output, and the agent's reasoning in sequence. If a trajectory file contains multiple runs (because the same attempt slot was re-used), each run is shown as a separate section.
+The Markdown file lands next to the `.jsonl` source (same name, `.md` extension). Open it in any Markdown viewer — it shows each command, its output, and the agent's reasoning in sequence.
+
+---
+
+## LLM Providers
+
+The harness supports multiple LLM providers through a unified abstraction layer. All providers use the same agent loop, scoring pipeline, and cost tracker. Anthropic is the default.
+
+### Supported providers
+
+| Provider | `--provider` | Env var | Notes |
+|---|---|---|---|
+| Anthropic (Claude) | `anthropic` | `ANTHROPIC_API_KEY` | Default. Prompt caching active. |
+| Groq | `groq` | `GROQ_API_KEY` | Fast LPU inference; pass `--model` for the Llama/Qwen model name. |
+| Azure AI Foundry | `azure` | `AZURE_AI_API_KEY` | Serverless open-source models (Phi-4, Llama, Mistral). Requires `--api-base-url`. |
+| Cerebras | `openai` | pass via `--api-key` | OpenAI-compat endpoint; 1M tokens/day free tier. |
+| Ollama (local) | `ollama` | — | Free; runs open-weight models on your machine. |
+| Any OpenAI-compat | `openai` | `OPENAI_API_KEY` | Together AI, Mistral, Azure OpenAI, etc. |
+
+### Provider examples
+
+**Anthropic (default):**
+```bash
+python scripts/run_eval.py --dataset preview --n-attempts 1
+```
+
+**Groq:**
+```bash
+# GROQ_API_KEY must be set in .env
+python scripts/run_eval.py \
+  --provider groq \
+  --model llama-3.3-70b-versatile \
+  --dataset preview --n-attempts 1
+```
+
+**Azure AI Foundry:**
+
+1. Go to [ai.azure.com](https://ai.azure.com) → create a project → Model Catalog → pick a model (e.g. Phi-4) → **Deploy → Serverless API**
+2. Copy the endpoint URL and API key into your `.env`
+
+```bash
+# .env
+AZURE_AI_API_KEY=your-key-here
+
+# Run
+python scripts/run_eval.py \
+  --provider azure \
+  --model Phi-4 \
+  --api-base-url "https://<your-project>.<region>.models.ai.azure.com" \
+  --dataset preview --n-attempts 1
+```
+
+Azure model names must match exactly what Azure expects (e.g. `Phi-4`, not `phi-4`). Check the endpoint's model name in the Azure AI Foundry portal.
+
+**Cerebras (OpenAI-compatible):**
+```bash
+# CEREBRAS_API_KEY must be set in .env
+python scripts/run_eval.py \
+  --provider openai \
+  --model qwen3-235b-a22b-instruct-2507 \
+  --api-base-url https://api.cerebras.ai/v1 \
+  --api-key "$CEREBRAS_API_KEY" \
+  --dataset preview --n-attempts 1
+```
+
+**Ollama (local, free):**
+```bash
+ollama pull phi4          # or llama3.3, qwen2.5:14b, etc.
+python scripts/run_eval.py \
+  --provider ollama \
+  --model phi4 \
+  --dataset preview --n-attempts 1
+```
+
+### LLM judge model
+
+The harness uses a second model call to grade answers that cannot be matched exactly (e.g. gene names, species names). By default this uses `claude-haiku-4-5-20251001` for Anthropic, or the same model as the eval model for other providers. Override with `--judge-model`:
+
+```bash
+python scripts/run_eval.py \
+  --provider groq --model llama-3.3-70b-versatile \
+  --judge-model llama-3.1-8b-instant \
+  --dataset preview --n-attempts 1
+```
 
 ---
 
@@ -94,13 +177,27 @@ The Markdown file lands next to the `.jsonl` source (same name, `.md` extension)
 | preview | 5        | 11 MB  | Public |
 | full    | 99       | 159 GB | [HuggingFace approval required](https://huggingface.co/datasets/Anthropic/BioMysteryBench-full) |
 
-## Cost Estimates (claude-sonnet-4-6 with prompt caching)
+---
 
-| Run              | Problems | Attempts | Est. Cost |
-|------------------|----------|----------|-----------|
-| Single problem   | 1        | 1        | ~$0.50    |
-| Preview set      | 5        | 5        | ~$9–$15   |
-| Full benchmark   | 99       | 5        | ~$180–300 |
+## Cost Estimates
+
+Costs depend on the model. All figures assume 5 preview problems × 1 attempt.
+
+| Model | Provider | Input $/M | Output $/M | Est. cost (5 problems × 1 attempt) |
+|---|---|---|---|---|
+| claude-sonnet-4-6 | Anthropic | $3.00 | $15.00 | ~$1–3 (with prompt caching) |
+| llama-3.3-70b-versatile | Groq | $0.59 | $0.79 | ~$0.10–0.30 |
+| Phi-4 | Azure AI Foundry | $0.125 | $0.50 | ~$0.05–0.15 |
+| Phi-4-mini | Azure AI Foundry | $0.025 | $0.095 | ~$0.01–0.05 |
+| Meta-Llama-3.3-70B-Instruct | Azure AI Foundry | $0.59 | $0.79 | ~$0.10–0.30 |
+| qwen3-235b-a22b | Cerebras | ~$6 | ~$6 | ~$0.50–1.00 |
+| any model | Ollama | free | free | $0 |
+
+> Azure AI Foundry prices are approximate and subject to change. Verify at [ai.azure.com/explore/models](https://ai.azure.com/explore/models) before large runs.
+
+Full benchmark (99 problems × 5 attempts) with Claude Sonnet: ~$180–300.
+
+---
 
 ## Custom Datasets
 
@@ -179,33 +276,47 @@ python scripts/run_eval.py --dataset-path my_problems/problems.jsonl --resume
 ```
 python scripts/run_eval.py [OPTIONS]
 
-  --dataset      preview|full      Dataset split (default: preview)
-  --dataset-path PATH              Local JSONL manifest (overrides --dataset)
-  --model        MODEL             Claude model (default: claude-sonnet-4-6)
-  --n-attempts   INT               Attempts per problem (default: 5)
-  --problem-ids  IDS               Comma-separated IDs to run (e.g. 0,1,2)
-  --dry-run                        Estimate cost, don't run
-  --resume                         Skip already-completed attempts
-  --max-cost     FLOAT             USD limit before halting (default: 100)
-  --max-steps    INT               Agent steps per attempt (default: 100)
-  --results-dir  DIR               Output directory (default: results/)
-  --no-build                       Skip Docker image check
+  --dataset        preview|full        Dataset split (default: preview)
+  --dataset-path   PATH                Local JSONL manifest (overrides --dataset)
+  --model          MODEL               Model name (default: claude-sonnet-4-6)
+  --provider       anthropic|openai|   LLM provider (default: anthropic)
+                   ollama|groq|azure
+  --api-base-url   URL                 Base URL for OpenAI-compatible endpoints
+  --api-key        KEY                 API key (overrides env var)
+  --judge-model    MODEL               Model used for LLM-as-judge scoring
+  --n-attempts     INT                 Attempts per problem (default: 5)
+  --parallel       INT                 Problems to run in parallel (default: 1)
+  --problem-ids    IDS                 Comma-separated IDs to run (e.g. 0,1,2)
+  --dry-run                            Estimate cost, don't run
+  --resume                             Skip already-completed attempts
+  --max-cost       FLOAT               USD limit before halting (default: 100)
+  --max-steps      INT                 Agent steps per attempt (default: 100)
+  --results-dir    DIR                 Output directory (default: results/)
+  --no-build                           Skip Docker image check
 ```
+
+---
 
 ## Architecture
 
 ```
 run_eval.py
   │
+  ├── llm.py          Provider ABC → AnthropicProvider / OpenAIProvider
+  │                   (format conversion, Llama text tool call recovery)
   ├── dataset.py      Load problems from HuggingFace, extract data.zip
   ├── container.py    Spin up a fresh Docker container per attempt
-  ├── agent.py        ReACT loop: Claude + bash tool → docker exec
+  ├── agent.py        ReACT loop: provider.chat() + bash tool → docker exec
   ├── scorer.py       Extract FINAL ANSWER, compare to rubric
   ├── logger.py       Write JSONL trajectory per (problem, attempt)
   └── cost_tracker.py Accumulate token usage, enforce cost limit
 ```
 
-**Key design choice:** The agent uses a *custom* `bash` tool (not the computer-use beta's `ToolBash20250124`). The orchestrator intercepts `tool_use` blocks and dispatches commands to the local Docker container via `docker exec`, giving Claude full control over a real bioinformatics environment.
+**Key design choice:** The agent uses a *custom* `bash` tool (not the computer-use beta's `ToolBash20250124`). The orchestrator intercepts `tool_use` blocks and dispatches commands to the local Docker container via `docker exec`, giving the model full control over a real bioinformatics environment.
+
+**Provider abstraction:** Anthropic message format is the canonical internal representation. `AnthropicProvider` and `OpenAIProvider` each handle their own wire-format conversion, so the agent loop, scorer, and cost tracker work identically regardless of which provider is in use. See [documents/code_walkthroughs/2.llm_backend_expansion.md](documents/code_walkthroughs/2.llm_backend_expansion.md) for a detailed walkthrough.
+
+---
 
 ## Results & Artifacts
 
@@ -213,7 +324,7 @@ After a run, the `results/` directory contains everything needed to inspect and 
 
 ```
 results/
-├── scores.json                          # aggregate scores (pass@1, pass@5, brittle flag, cost)
+├── scores.json                          # aggregate scores (pass@1, pass@5, brittle flag, per-attempt cost)
 ├── report.md                            # human-readable summary (generated by scripts/report.py)
 │
 ├── trajectories/
@@ -233,9 +344,9 @@ Each line in a trajectory file is one timestamped event. The `role` field tells 
 
 | `role` | What it contains |
 |--------|-----------------|
-| `user` | The problem question sent to Claude |
-| `assistant` | Claude's reasoning text (`reasoning` field) + raw API response + token usage |
-| `tool_call` | The exact bash command Claude chose to run |
+| `user` | The problem question sent to the model |
+| `assistant` | The model's reasoning text + raw API response + token usage |
+| `tool_call` | The exact bash command the model chose to run |
 | `tool_result` | Full stdout, full stderr, and exit code from that command |
 | `status` | Final answer and completion reason (`success`, `max_steps`, `timeout`, etc.) |
 
@@ -246,6 +357,8 @@ Every `wget`, `curl`, `pip install`, `conda install`, and database query appears
 Anything the agent writes to `/workspace/scratch/` during a run — Python scripts, R scripts, intermediate BAM/VCF/CSV files, downloaded references — is copied to `results/artifacts/problem-{id}_attempt-{k}/` before the container is destroyed. Scripts written by the agent can be re-run independently to verify the analysis.
 
 > **Disk note:** If the agent downloads large reference files (e.g. a chromosome FASTA) into scratch, those will appear in artifacts and can be large. Delete `results/artifacts/` freely — nothing there is needed to re-run the benchmark.
+
+---
 
 ## Agent Behaviour: Resource Awareness and Tool Choice
 
@@ -296,6 +409,8 @@ and gives a quantified estimate of what would be sufficient. See
 [documents/scaling_with_azure.md](documents/scaling_with_azure.md) for recommended VM sizes
 that address common resource limits.
 
+---
+
 ## Filesystem Safety
 
 ### What is guaranteed by the hypervisor (not a prompt — hardware enforcement)
@@ -337,17 +452,19 @@ or eval on the host side.
 - Per-run timeout: 60 minutes
 - Session cost limit: $100 (overridable with `--max-cost`)
 
+---
+
 ## Testing
 
 The test suite covers all harness components that can be exercised without a live
-Docker daemon or Anthropic API key. Docker calls are mocked; the agent loop and
+Docker daemon or API key. Docker calls are mocked; the agent loop and
 LLM-as-judge scorer are not tested at this layer.
 
 ### Running the tests
 
 ```bash
 pip install -e .          # install project dependencies first
-python3 -m pytest         # run all 113 tests
+python3 -m pytest         # run all 168 tests
 ```
 
 ### Test files
@@ -358,17 +475,19 @@ python3 -m pytest         # run all 113 tests
 | `tests/test_cost_tracker.py` | `harness/cost_tracker.py` | Token accumulation, cost formula with cache discount, spend-cap enforcement, pre-run estimation |
 | `tests/test_logger.py` | `harness/logger.py` | JSONL file creation, record format, sequential step numbers, resume detection |
 | `tests/test_dataset.py` | `harness/dataset.py` | Zip extraction, file content, idempotency, `HF_HOME` isolation |
-| `tests/test_agent_helpers.py` | `harness/agent.py` | `_extract_text`, `_format_result`, `_handle_abort`, tool schema definitions |
+| `tests/test_agent_helpers.py` | `harness/agent.py`, `harness/llm.py` | Tool schema definitions, text extraction, format conversion helpers, Llama text tool call parser, provider factory |
 | `tests/test_container.py` | `harness/container.py` | `exec_command`, artifact collection, scratch dir location, context manager |
 
 ### What is not tested here
 
-- **Agent loop** (`AgentRun.run()`) — requires a real Anthropic API key
-- **LLM-as-judge scorer** (`_llm_judge`) — requires a real Anthropic API key
+- **Agent loop** (`AgentRun.run()`) — requires a live API key
+- **LLM-as-judge scorer** (`_llm_judge`) — requires a live API key
 - **Full container execution** — requires a running Docker daemon with the sandbox image built
 
 See [documents/features.md](documents/features.md) for a full description of every
 feature and its corresponding tests.
+
+---
 
 ## Comparing Results to Anthropic's Benchmarks
 
@@ -382,9 +501,13 @@ Anthropic did not publish per-problem results for the 5-problem preview set. The
 
 To replicate Anthropic's published numbers you need the full 99-problem dataset (HuggingFace approval required). The `human_solvable` field lets you reproduce the human-solvable vs. human-difficult split used in the paper.
 
+---
+
 ## References
 
 - [BioMysteryBench Research Article](https://www.anthropic.com/research/Evaluating-Claude-For-Bioinformatics-With-BioMysteryBench)
 - [Preview Dataset (HuggingFace)](https://huggingface.co/datasets/Anthropic/BioMysteryBench-preview)
 - [Full Dataset (HuggingFace)](https://huggingface.co/datasets/Anthropic/BioMysteryBench-full)
 - [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python)
+- [Code walkthrough: harness end-to-end](documents/code_walkthroughs/code_flow.md)
+- [Code walkthrough: multi-provider LLM backend](documents/code_walkthroughs/2.llm_backend_expansion.md)
