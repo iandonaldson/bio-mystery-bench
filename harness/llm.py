@@ -7,6 +7,8 @@ provider-agnostic.
 """
 
 import json
+import re
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -121,6 +123,7 @@ class OpenAIProvider(Provider):
         self._client = openai.OpenAI(api_key=api_key, base_url=base_url)
 
     def chat(self, model, system, messages, tools, max_tokens) -> LLMResponse:
+        import openai as _openai
         oai_messages = anthropic_to_openai_messages(messages, system)
         oai_tools = [anthropic_tool_to_openai(t) for t in tools] if tools else None
         kwargs: dict[str, Any] = dict(
@@ -130,8 +133,29 @@ class OpenAIProvider(Provider):
         )
         if oai_tools:
             kwargs["tools"] = oai_tools
-        response = self._client.chat.completions.create(**kwargs)
-        return openai_response_to_llm_response(response)
+        try:
+            response = self._client.chat.completions.create(**kwargs)
+            return openai_response_to_llm_response(response)
+        except _openai.BadRequestError as e:
+            # Groq rejects malformed Llama tool calls (e.g. <function=bash[]>...).
+            # Recover by extracting the tool call from the failed_generation field.
+            error_body = getattr(e, "body", None) or {}
+            failed_gen = (error_body.get("error") or {}).get("failed_generation", "")
+            tool_call = _parse_llama_text_tool_call(failed_gen)
+            if tool_call:
+                return LLMResponse(
+                    stop_reason="tool_use",
+                    text="",
+                    tool_calls=[tool_call],
+                    usage=LLMUsage(),
+                    raw_content=[{
+                        "type": "tool_use",
+                        "id": tool_call.id,
+                        "name": tool_call.name,
+                        "input": tool_call.input,
+                    }],
+                )
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +277,15 @@ def openai_response_to_llm_response(response: Any) -> LLMResponse:
             "input": input_dict,
         })
 
+    # Fallback: some Llama models output tool calls as text rather than using
+    # the structured tool_calls field. Detect and convert them.
+    if not tool_calls and text:
+        text_tc = _parse_llama_text_tool_call(text)
+        if text_tc:
+            stop_reason = "tool_use"
+            tool_calls.append(text_tc)
+            raw_content = [{"type": "tool_use", "id": text_tc.id, "name": text_tc.name, "input": text_tc.input}]
+
     usage = response.usage
     cache_read = 0
     if hasattr(usage, "prompt_tokens_details") and usage.prompt_tokens_details:
@@ -268,6 +301,45 @@ def openai_response_to_llm_response(response: Any) -> LLMResponse:
             cache_read_tokens=cache_read,
         ),
         raw_content=raw_content,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Llama text-format tool call parser
+# ---------------------------------------------------------------------------
+
+def _parse_llama_text_tool_call(text: str) -> Optional[LLMToolCall]:
+    """Parse Llama-family text-format tool calls into an LLMToolCall.
+
+    Handles two formats emitted by llama models on Groq:
+      <function/bash>{"command": "..."}                (end_turn text response)
+      <function=bash[]{"command": "..."}></function>   (Groq failed_generation error body)
+    """
+    m = re.search(r"<function[/=](\w+)", text)
+    if not m:
+        return None
+    name = m.group(1)
+    json_start = text.find("{", m.start())
+    if json_start == -1:
+        return None
+    depth = 0
+    json_end = json_start
+    for i, ch in enumerate(text[json_start:], json_start):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                json_end = i + 1
+                break
+    try:
+        input_dict = json.loads(text[json_start:json_end])
+    except json.JSONDecodeError:
+        return None
+    return LLMToolCall(
+        id=f"call_{uuid.uuid4().hex[:8]}",
+        name=name,
+        input=input_dict,
     )
 
 

@@ -236,6 +236,7 @@ from harness.llm import (
     LLMToolCall,
     LLMUsage,
     LLMResponse,
+    _parse_llama_text_tool_call,
 )
 
 
@@ -443,3 +444,56 @@ class TestBuildProvider:
     def test_judge_model_defaults_to_empty_string(self):
         p = build_provider("openai", "fake-key")
         assert p.judge_model == ""
+
+
+class TestParseLlamaTextToolCall:
+    def test_slash_format_parses_name_and_input(self):
+        text = '<function/bash>{"command": "ls /workspace/data"}</function>'
+        tc = _parse_llama_text_tool_call(text)
+        assert tc is not None
+        assert tc.name == "bash"
+        assert tc.input == {"command": "ls /workspace/data"}
+
+    def test_equals_format_with_brackets_parses_correctly(self):
+        text = '<function=bash[]{"command": "grep -i condition /workspace/data/*"}></function>'
+        tc = _parse_llama_text_tool_call(text)
+        assert tc is not None
+        assert tc.name == "bash"
+        assert tc.input == {"command": "grep -i condition /workspace/data/*"}
+
+    def test_equals_format_without_brackets_parses_correctly(self):
+        text = '<function=bash>{"command": "file /workspace/data/*"}</function>'
+        tc = _parse_llama_text_tool_call(text)
+        assert tc is not None
+        assert tc.name == "bash"
+
+    def test_abort_tool_parsed(self):
+        text = '<function/abort>{"reason": "insufficient RAM", "required_ram_gb": 16, "required_disk_gb": 10, "required_cpus": 4, "explanation": "need more"}</function>'
+        tc = _parse_llama_text_tool_call(text)
+        assert tc is not None
+        assert tc.name == "abort"
+        assert tc.input["required_ram_gb"] == 16
+
+    def test_no_match_returns_none(self):
+        assert _parse_llama_text_tool_call("just plain text") is None
+        assert _parse_llama_text_tool_call("") is None
+
+    def test_id_is_unique_per_call(self):
+        text = '<function/bash>{"command": "ls"}</function>'
+        tc1 = _parse_llama_text_tool_call(text)
+        tc2 = _parse_llama_text_tool_call(text)
+        assert tc1.id != tc2.id
+
+    def test_openai_response_with_text_tool_call_detected_as_tool_use(self):
+        response = MagicMock()
+        response.choices[0].finish_reason = "stop"
+        response.choices[0].message.content = '<function/bash>{"command": "ls /workspace/data"}</function>'
+        response.choices[0].message.tool_calls = None
+        response.usage.prompt_tokens = 100
+        response.usage.completion_tokens = 20
+        response.usage.prompt_tokens_details = None
+        result = openai_response_to_llm_response(response)
+        assert result.stop_reason == "tool_use"
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "bash"
+        assert result.tool_calls[0].input == {"command": "ls /workspace/data"}
