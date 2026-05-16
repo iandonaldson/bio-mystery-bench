@@ -35,23 +35,37 @@ _API_KEY_ENV_VARS = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
     "groq": "GROQ_API_KEY",
+    "azure": "AZURE_AI_API_KEY",
 }
 
 _DEFAULT_BASE_URLS = {
     "groq": "https://api.groq.com/openai/v1",
     "ollama": "http://localhost:11434/v1",
+    # azure has no default — each project gets a unique endpoint URL
 }
 
 # Known per-million-token costs (input, output). Models not listed default to 0.
+# Azure AI Foundry prices: https://ai.azure.com/explore/models (verify before large runs)
 _MODEL_COSTS: dict[str, tuple[float, float]] = {
-    "claude-sonnet-4-6":           (3.0,   15.0),
-    "claude-opus-4-7":             (15.0,  75.0),
-    "claude-haiku-4-5-20251001":   (0.8,    4.0),
-    "llama-3.3-70b-versatile":     (0.59,   0.79),
-    "llama-3.3-70b-specdec":       (0.59,   0.79),
-    "llama-3.1-70b-versatile":     (0.59,   0.79),
-    "llama-3.1-8b-instant":        (0.05,   0.08),
-    "qwen3-32b":                   (0.29,   0.59),
+    # Anthropic
+    "claude-sonnet-4-6":                (3.0,    15.0),
+    "claude-opus-4-7":                  (15.0,   75.0),
+    "claude-haiku-4-5-20251001":        (0.8,     4.0),
+    # Groq (Llama family)
+    "llama-3.3-70b-versatile":          (0.59,    0.79),
+    "llama-3.3-70b-specdec":            (0.59,    0.79),
+    "llama-3.1-70b-versatile":          (0.59,    0.79),
+    "llama-3.1-8b-instant":             (0.05,    0.08),
+    "qwen3-32b":                        (0.29,    0.59),
+    # Azure AI Foundry — serverless (MaaS) pay-per-token rates
+    "Phi-4":                            (0.125,   0.50),
+    "Phi-4-mini":                       (0.025,   0.095),
+    "Phi-4-mini-reasoning":             (0.025,   0.095),
+    "Meta-Llama-3.3-70B-Instruct":      (0.59,    0.79),
+    "Meta-Llama-3.1-8B-Instruct":       (0.05,    0.10),
+    "Mistral-Large-2411":               (2.0,     6.0),
+    "Mistral-Nemo":                     (0.13,    0.13),
+    "Cohere-command-r-plus-08-2024":    (2.5,    10.0),
 }
 
 
@@ -213,7 +227,7 @@ def _run_problem(
 @click.option("--model", default="claude-sonnet-4-6", show_default=True,
               help="Model to use for inference.")
 @click.option("--provider", default="anthropic",
-              type=click.Choice(["anthropic", "openai", "ollama", "groq"]), show_default=True,
+              type=click.Choice(["anthropic", "openai", "ollama", "groq", "azure"]), show_default=True,
               help="LLM provider.")
 @click.option("--api-base-url", default=None,
               help="Base URL for OpenAI-compatible endpoints (e.g. http://localhost:11434/v1).")
@@ -316,6 +330,14 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
     if not resolved_key:
         env_hint = _API_KEY_ENV_VARS.get(provider, "LLM_API_KEY")
         console.print(f"[red]No API key for provider '{provider}'. Set {env_hint} or pass --api-key.[/red]")
+        sys.exit(1)
+
+    if provider == "azure" and not resolved_base_url:
+        console.print(
+            "[red]--api-base-url is required for --provider azure.\n"
+            "Copy the endpoint URL from your Azure AI Foundry project "
+            "(e.g. https://<project>.<region>.models.ai.azure.com).[/red]"
+        )
         sys.exit(1)
 
     resolved_judge = judge_model or ("claude-haiku-4-5-20251001" if provider == "anthropic" else model)

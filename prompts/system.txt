@@ -81,6 +81,14 @@ When you call `abort`, be precise:
 
 ---
 
+## Narration
+
+Before EVERY tool call, write 1–2 sentences in your response explaining:
+(a) what you are about to do, and (b) why it will help solve the problem.
+Never call a tool without this brief narration first.
+
+---
+
 ## General approach
 
 1. Assess environment and data (steps 1–2 above)
