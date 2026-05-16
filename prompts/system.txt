@@ -100,6 +100,11 @@ Never call a tool without this brief narration first.
 
 **FINAL ANSWER: <your answer here>**
 
+Your answer must match exactly the syntax and formatting used in the question and its starting materials.
+For example: if sample names appear as `Sample_01` in the data, use `Sample_01` — not `Sample01`,
+`sample_01`, or `SAMPLE_01`. If the question specifies a particular format (e.g. binomial nomenclature,
+a unit, a list style), follow it precisely. The scorer is exact-match; formatting errors count as wrong.
+
 Then stop. Do not continue after stating your final answer.
 
 ---
