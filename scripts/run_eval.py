@@ -263,9 +263,15 @@ def _run_problem(
               help="Skip Docker image build check.")
 @click.option("--dataset-path", default=None,
               help="Path to a local JSONL manifest file (overrides --dataset).")
+@click.option("--critic-injection-points", multiple=True,
+              type=click.Choice(["after_final_answer"]),
+              help="Inject critic at this point (repeatable). E.g. --critic-injection-points after_final_answer")
+@click.option("--critic-model", default="",
+              help="Model for the critic (default: same as agent model).")
 def main(dataset, model, provider, api_base_url, api_key, judge_model,
          n_attempts, parallel, problem_ids, dry_run, resume, max_cost, max_steps,
-         docker_memory, docker_cpus, results_dir, no_build, dataset_path):
+         docker_memory, docker_cpus, results_dir, no_build, dataset_path,
+         critic_injection_points, critic_model):
     """Run BioMysteryBench evaluation harness."""
 
     config = RunConfig(
@@ -279,6 +285,8 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         results_dir=results_dir,
         docker_memory=docker_memory,
         docker_cpus=docker_cpus,
+        critic_injection_points=list(critic_injection_points),
+        critic_model=critic_model,
     )
 
     # Auto-resolve base URL for providers with a known default endpoint
