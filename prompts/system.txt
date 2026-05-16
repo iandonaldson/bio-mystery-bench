@@ -140,3 +140,9 @@ Install additional tools if needed:
 pip install <package>
 micromamba install -c bioconda <package>
 ```
+
+Before installing any tool, verify it is not already available:
+```bash
+which python3 python bedtools samtools bwa bowtie2 minimap2 salmon kallisto
+```
+Never attempt installation as a first step — most bioinformatics tools are pre-installed.

@@ -66,6 +66,10 @@ _MODEL_COSTS: dict[str, tuple[float, float]] = {
     "Mistral-Large-2411":               (2.0,     6.0),
     "Mistral-Nemo":                     (0.13,    0.13),
     "Cohere-command-r-plus-08-2024":    (2.5,    10.0),
+    # Cerebras
+    "qwen-3-235b-a22b-instruct-2507":   (0.60,    0.60),
+    "llama3.1-8b":                      (0.10,    0.10),
+    "gpt-oss-120b":                     (1.20,    1.20),
 }
 
 
