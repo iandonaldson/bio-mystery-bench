@@ -137,8 +137,10 @@ class AgentRun:
         config: RunConfig,
         logger: TrajectoryLogger,
         cost_tracker: CostTracker,
+        critic_client: Provider | None = None,
     ):
         self.client = client
+        self.critic_client = critic_client or client  # separate provider for critic, defaults to agent
         self.container = container
         self.question = problem_question
         self.system_prompt = system_prompt
@@ -341,7 +343,8 @@ class AgentRun:
             self.output_tokens += response.usage.output_tokens
             self.cache_read_tokens += response.usage.cache_read_tokens
             return response.text
-        except Exception:
+        except Exception as e:
+            self.logger.log("critic_error", {"error": str(e), "critic_model": critic_model})
             return ""
 
     def _format_trajectory_for_critic(self, final_answer: str) -> str:
