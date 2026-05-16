@@ -73,7 +73,29 @@ def _parse_number(text: str) -> Optional[float]:
     return None
 
 
+_RUBRIC_ANSWER_RE = re.compile(
+    r"(?:(?:the\s+)?(?:expected\s+)?answer\s+is[:\s]+)([^\n.]+)",
+    re.IGNORECASE,
+)
+
+
+def _extract_rubric_answer(rubric: str) -> Optional[str]:
+    """Pull the canonical answer out of a rubric string, if detectable."""
+    m = _RUBRIC_ANSWER_RE.search(rubric)
+    if m:
+        return m.group(1).strip().rstrip(".,;")
+    return None
+
+
 def _llm_judge(predicted: str, rubric: str, client: Any) -> bool:
+    if not predicted.strip():
+        return False
+
+    # Fast-path: extract the expected answer from the rubric and compare directly.
+    rubric_answer = _extract_rubric_answer(rubric)
+    if rubric_answer and predicted.strip().lower() == rubric_answer.lower():
+        return True
+
     prompt = (
         f"You are grading a bioinformatics answer.\n\n"
         f"Expected answer (rubric): {rubric}\n\n"
@@ -83,7 +105,7 @@ def _llm_judge(predicted: str, rubric: str, client: Any) -> bool:
     try:
         if hasattr(client, "chat"):
             # Provider ABC path (LLMClient / harness.llm)
-            judge_model = getattr(client, "judge_model", "") or "claude-haiku-4-5-20251001"
+            judge_model = getattr(client, "judge_model", "") or "claude-3-5-haiku-20241022"
             response = client.chat(
                 model=judge_model,
                 system="",
@@ -95,7 +117,7 @@ def _llm_judge(predicted: str, rubric: str, client: Any) -> bool:
         else:
             # Raw anthropic.Anthropic backwards-compat path
             response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model="claude-3-5-haiku-20241022",
                 max_tokens=10,
                 messages=[{"role": "user", "content": prompt}],
             )
