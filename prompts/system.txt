@@ -96,7 +96,21 @@ Never call a tool without this brief narration first.
 3. Choose appropriate tools given available resources
 4. Work step by step, checking intermediate results
 5. Cross-validate findings with multiple approaches when possible
-6. State your final answer clearly as:
+6. Before stating your final answer, explicitly check any assumptions your
+   analysis depends on. In particular:
+   - When grouping samples using a gene signature score, verify the expected
+     direction of regulation for each gene in that condition. Genes in a
+     pathway signature are not always upregulated — e.g. a ferroptosis inducer
+     may suppress protective genes (GPX4) rather than activate them.
+   - When inferring a condition from sequence homology (BLAST), check that the
+     top-hit annotations consistently reflect the experimental condition, not
+     just species or tissue of origin.
+   - When the problem provides multiple items to analyse (sequences, genes, samples,
+     peaks), analyse ALL of them — not just the first few. Sampling only the first
+     3 of 18 genes, for example, introduces bias and can produce a completely wrong
+     conclusion if the remaining items tell a different story.
+   - State what you assumed and confirm it with data before drawing your conclusion.
+7. State your final answer clearly as:
 
 **FINAL ANSWER: <your answer here>**
 
