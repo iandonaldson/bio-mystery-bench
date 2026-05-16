@@ -118,6 +118,7 @@ def _run_problem(
     n_attempts: int,
     resume: bool,
     results_dir: str,
+    critic_client: Provider | None = None,
 ) -> None:
     """Run all attempts for a single problem. Safe to call from multiple threads."""
     pid = problem.id
@@ -161,6 +162,7 @@ def _run_problem(
                     config=config,
                     logger=traj_logger,
                     cost_tracker=cost_tracker,
+                    critic_client=critic_client,
                 )
                 result = run.run()
 
@@ -354,6 +356,21 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
 
     resolved_judge = judge_model or ("claude-haiku-4-5-20251001" if provider == "anthropic" else model)
     client = build_provider(provider, resolved_key, resolved_base_url, resolved_judge)
+
+    # Build critic client — may be a different provider from the agent
+    critic_client = None
+    if critic_injection_points:
+        resolved_critic = critic_model or model
+        if resolved_critic.startswith("claude-") and provider != "anthropic":
+            # Critic is a Claude model but agent is on a different provider — build Anthropic client
+            anthropic_key = _resolve_api_key("anthropic", None)
+            if not anthropic_key:
+                console.print("[red]Critic model is a Claude model but ANTHROPIC_API_KEY is not set.[/red]")
+                sys.exit(1)
+            critic_client = build_provider("anthropic", anthropic_key, None, resolved_critic)
+        else:
+            critic_client = client  # same provider; critic_model handled inside AgentRun
+
     system_prompt = load_system_prompt()
 
     # Ensure Docker image exists
@@ -385,6 +402,7 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         n_attempts=n_attempts,
         resume=resume,
         results_dir=results_dir,
+        critic_client=critic_client,
     )
 
     with ThreadPoolExecutor(max_workers=parallel) as executor:
