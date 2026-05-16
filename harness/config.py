@@ -1,6 +1,9 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+# Valid injection point identifiers. More can be added here as the harness evolves.
+CRITIC_INJECTION_POINTS = ("after_final_answer",)
+
 
 @dataclass
 class RunConfig:
@@ -23,3 +26,6 @@ class RunConfig:
     # Cost per million tokens (claude-sonnet-4-6 as of 2026-05)
     cost_per_million_input: float = 3.0
     cost_per_million_output: float = 15.0
+    # Critic agent — list of injection point names (empty = disabled)
+    critic_injection_points: list = field(default_factory=list)
+    critic_model: str = ""  # empty = use same model as agent

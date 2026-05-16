@@ -77,6 +77,25 @@ ABORT_TOOL = {
     },
 }
 
+CRITIC_SYSTEM_PROMPT = """\
+You are a scientific reasoning auditor reviewing an AI agent's solution to a
+computational biology problem. Your job is to identify assumptions the agent
+made that were NOT empirically verified during the analysis.
+
+For each unverified assumption:
+1. State the assumption clearly
+2. Explain what the agent would need to do to verify it
+3. Rate the risk: HIGH (would likely change the conclusion if wrong),
+   MEDIUM (might affect confidence but not conclusion), or LOW (minor)
+
+Be concrete and specific — cite the actual reasoning steps where the assumption
+was made. Do not flag assumptions that were explicitly tested.
+Focus on the 2-3 most consequential unverified assumptions.
+
+At the end, state whether any HIGH-risk assumption would plausibly change the
+final answer if it turned out to be wrong.\
+"""
+
 # Commands run before the agent starts — logged and injected as environment context
 RESOURCE_CHECK_CMD = """\
 echo "=== CPU ===" && nproc && \
@@ -132,6 +151,7 @@ class AgentRun:
         self.input_tokens = 0
         self.output_tokens = 0
         self.cache_read_tokens = 0
+        self._critic_injected = False
 
     def run(self) -> AgentResult:
         start = time.monotonic()
@@ -214,6 +234,24 @@ class AgentRun:
             self.steps += 1
 
             if response.stop_reason == "end_turn":
+                # Critic injection point: after_final_answer
+                if (
+                    "after_final_answer" in self.config.critic_injection_points
+                    and not self._critic_injected
+                ):
+                    self._critic_injected = True
+                    critique = self._run_critic(response.text)
+                    if critique:
+                        self.logger.log("critic", {
+                            "model": self.config.critic_model or self.config.model,
+                            "critique": critique,
+                        })
+                        self.messages.append({
+                            "role": "user",
+                            "content": _format_critic_injection(critique),
+                        })
+                        continue
+
                 self.logger.log("status", {"status": "success", "final_message": response.text})
                 return AgentResult(
                     status="success",
@@ -278,6 +316,79 @@ class AgentRun:
 
         return self._result("error", start)  # unreachable
 
+    def _run_critic(self, final_answer: str) -> str:
+        """Call the critic model on the current trajectory. Returns critique text, or '' on error."""
+        trajectory_text = self._format_trajectory_for_critic(final_answer)
+        critic_model = self.config.critic_model or self.config.model
+        try:
+            response = self.client.chat(
+                model=critic_model,
+                system=CRITIC_SYSTEM_PROMPT,
+                messages=[{
+                    "role": "user",
+                    "content": f"Please audit the following agent trajectory:\n\n{trajectory_text}",
+                }],
+                tools=[],
+                max_tokens=1024,
+            )
+            # Attribute critic token usage to this run's totals
+            self.cost_tracker.add(
+                response.usage.input_tokens,
+                response.usage.output_tokens,
+                response.usage.cache_read_tokens,
+            )
+            self.input_tokens += response.usage.input_tokens
+            self.output_tokens += response.usage.output_tokens
+            self.cache_read_tokens += response.usage.cache_read_tokens
+            return response.text
+        except Exception:
+            return ""
+
+    def _format_trajectory_for_critic(self, final_answer: str) -> str:
+        """Render self.messages as readable text for the critic."""
+        sections = []
+        first_user = True
+        for msg in self.messages:
+            role = msg.get("role", "")
+            content = msg.get("content", [])
+            if isinstance(content, str):
+                content = [{"type": "text", "text": content}]
+
+            if role == "user":
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    btype = block.get("type", "")
+                    if btype == "text" and first_user:
+                        first_user = False
+                        sections.append(f"PROBLEM:\n{block.get('text','')[:3000]}")
+                    elif btype == "tool_result":
+                        result = block.get("content", "")
+                        if isinstance(result, list):
+                            result = " ".join(
+                                b.get("text", "") for b in result if isinstance(b, dict)
+                            )
+                        sections.append(f"TOOL RESULT:\n{str(result)[:600]}")
+
+            elif role == "assistant":
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    btype = block.get("type", "")
+                    if btype == "text":
+                        text = block.get("text", "").strip()
+                        if text:
+                            sections.append(f"AGENT REASONING:\n{text[:400]}")
+                    elif btype == "tool_use":
+                        cmd = block.get("input", {}).get("command", "")
+                        cmd_lines = cmd.splitlines()
+                        if len(cmd_lines) > 25:
+                            cmd = "\n".join(cmd_lines[:25]) + f"\n... [{len(cmd_lines)-25} more lines]"
+                        sections.append(f"BASH COMMAND:\n{cmd}")
+
+        sections.append(f"FINAL ANSWER:\n{final_answer}")
+        return "\n\n---\n\n".join(sections)
+
     def _get_environment_context(self) -> str:
         """Run resource-check commands in the container and return formatted output."""
         try:
@@ -334,6 +445,20 @@ def _handle_abort(inputs: dict, logger: TrajectoryLogger, start: float, run: "Ag
         cache_read_tokens=run.cache_read_tokens,
         wall_seconds=time.monotonic() - start,
         resource_estimate=estimate,
+    )
+
+
+def _format_critic_injection(critique: str) -> str:
+    return (
+        "[CRITIC REVIEW]\n"
+        "A scientific reasoning auditor has reviewed your analysis and identified "
+        "the following concerns:\n\n"
+        f"{critique}\n\n"
+        "Please address any HIGH-risk concerns before finalising your answer:\n"
+        "- If you agree with a concern, use bash to verify the assumption, then state "
+        "your revised FINAL ANSWER.\n"
+        "- If you disagree, briefly explain why and restate your original FINAL ANSWER.\n"
+        "You must end with: FINAL ANSWER: <answer>"
     )
 
 
