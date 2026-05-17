@@ -323,7 +323,7 @@ class AgentRun:
         trajectory_text = self._format_trajectory_for_critic(final_answer)
         critic_model = self.config.critic_model or self.config.model
         try:
-            response = self.client.chat(
+            response = self.critic_client.chat(
                 model=critic_model,
                 system=CRITIC_SYSTEM_PROMPT,
                 messages=[{
