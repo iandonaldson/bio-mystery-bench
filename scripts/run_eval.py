@@ -50,7 +50,7 @@ _MODEL_COSTS: dict[str, tuple[float, float]] = {
     # Anthropic
     "claude-sonnet-4-6":                (3.0,    15.0),
     "claude-opus-4-7":                  (15.0,   75.0),
-    "claude-3-5-haiku-20241022":        (0.8,     4.0),
+    "claude-haiku-4-5-20251001":        (0.8,     4.0),
     # Groq (Llama family)
     "llama-3.3-70b-versatile":          (0.59,    0.79),
     "llama-3.3-70b-specdec":            (0.59,    0.79),
@@ -80,6 +80,21 @@ def _resolve_api_key(provider: str, explicit_key: str | None) -> str | None:
         return os.environ.get("OLLAMA_API_KEY", "ollama")
     env_var = _API_KEY_ENV_VARS.get(provider, "LLM_API_KEY")
     return os.environ.get(env_var)
+
+
+def _ping_model(client: "Provider", model: str, label: str) -> None:
+    """Verify a model is reachable. Exits with a clear error if not."""
+    try:
+        client.chat(
+            model=model,
+            system="",
+            messages=[{"role": "user", "content": [{"type": "text", "text": "ping"}]}],
+            tools=[],
+            max_tokens=1,
+        )
+    except Exception as e:
+        console.print(f"[red]Preflight check failed for {label} model '{model}': {e}[/red]")
+        sys.exit(1)
 
 
 def load_system_prompt() -> str:
@@ -355,7 +370,7 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         )
         sys.exit(1)
 
-    resolved_judge = judge_model or ("claude-3-5-haiku-20241022" if provider == "anthropic" else model)
+    resolved_judge = judge_model or ("claude-haiku-4-5-20251001" if provider == "anthropic" else model)
     client = build_provider(provider, resolved_key, resolved_base_url, resolved_judge)
 
     # Build critic client — may be a different provider from the agent
@@ -383,6 +398,19 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         judge_client = build_provider("anthropic", anthropic_key, None, resolved_judge)
     else:
         judge_client = client
+
+    # Preflight: verify all model endpoints before committing to a full run
+    console.print("[dim]Checking model endpoints...[/dim]")
+    _ping_model(client, model, "agent")
+    seen_clients = {id(client)}
+    if judge_client and id(judge_client) not in seen_clients:
+        _ping_model(judge_client, resolved_judge, "judge")
+        seen_clients.add(id(judge_client))
+    if critic_client and id(critic_client) not in seen_clients:
+        resolved_critic_model = (critic_model or model) if critic_injection_points else None
+        if resolved_critic_model:
+            _ping_model(critic_client, resolved_critic_model, "critic")
+    console.print("[dim]All model endpoints OK.[/dim]")
 
     system_prompt = load_system_prompt()
 

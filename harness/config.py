@@ -10,7 +10,7 @@ class RunConfig:
     model: str = "claude-sonnet-4-6"
     provider: str = "anthropic"
     api_base_url: Optional[str] = None
-    judge_model: str = "claude-3-5-haiku-20241022"
+    judge_model: str = "claude-haiku-4-5-20251001"
     judge_provider: str = "anthropic"
     n_attempts: int = 5
     max_steps: int = 100
