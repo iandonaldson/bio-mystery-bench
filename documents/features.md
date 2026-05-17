@@ -287,3 +287,23 @@ after each attempt in the CLI.
 - `TestCostTrackerCheckLimit` — under limit (no raise), over limit (raises with message)
 - `TestCostTrackerEstimate` — positive float, monotonic with problem count, sub-linear with attempt count (caching effect)
 - `TestCostTrackerSummary` — token counts present, cost symbol present
+
+---
+
+## Pending Slices
+
+> **Before implementing any slice below**, decompose it into sub-slices per the
+> elephant carpaccio rule in `SKILLS/code_learnings.md` (L-05). Each sub-slice
+> needs its own unit test; do not rely solely on integration testing.
+
+### BLAST Subagent
+Offload BLAST queries to a separate subprocess/subagent to prevent long BLAST
+stdout from consuming the agent's context window. Decompose into:
+- B-1: Wrapper script that runs BLAST and writes results to scratch
+- B-2: Agent tool that invokes the wrapper and returns a summary
+- B-3: Tests with mock BLAST output
+
+### Curated Bioinformatics Tool Wrappers
+Structured wrappers for tools that commonly produce large or hard-to-parse output
+(DESeq2, STAR, featureCounts). Each wrapper: runs the tool, extracts key metrics,
+writes structured JSON to scratch. Decompose per-tool, one sub-slice each.

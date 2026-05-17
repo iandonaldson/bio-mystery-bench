@@ -15,8 +15,9 @@ Every session — no exceptions — must begin with these steps in order:
    slices in `claude-progress.txt`. If any commits reference a slice not yet marked complete
    in the progress file or `features.md`, update both before proceeding.
 4. Read `documents/features.md` — understand the full feature slice list and which items are done, in-progress, or pending
-5. Run existing tests — confirm baseline is green before touching anything
-6. Only then begin implementation
+5. Read `SKILLS/code_learnings.md` — review lessons from past sessions before implementing anything
+6. Run existing tests — confirm baseline is green before touching anything
+7. Only then begin implementation
 
 If `claude-progress.txt` does not exist yet, you are the initializer agent — see the Initializer Agent section below.
 

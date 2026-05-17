@@ -1,24 +1,31 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-15 — PR #19 merged (trajectory fixes + cost tracking); code walkthrough document added
+2026-05-17 — PRs #29–#33 merged; all Cerebras/QWEN + critic + judge bugs resolved
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
-providers. Three bug-fix PRs merged: Groq named provider (#15), Llama text-format
-tool call recovery (#16), artifact copy errors silenced (#17). 168/168 tests passing.
+providers. Five bug-fix PRs merged today (#29–#33), resolving a cascade of failures
+that were blocking Cerebras + Qwen3-235B runs with an Anthropic critic/judge.
+168/168 tests passing.
+
+Root cause chain that was fixed:
+1. Critic was routing to the wrong client (used agent client instead of Anthropic critic client) — PR #31
+2. Haiku model was deprecated (claude-3-5-haiku-20241022 → 404) — PR #29/#32
+3. Empty system prompt caused Anthropic API 400: cache_control block sent on empty text — PR #33
+4. Preflight ping added so future model 404s fail fast at startup — PR #32
 
 Preview benchmark results so far:
 - Claude Sonnet 4.6 (Anthropic): 80% pass@1 (from earlier run)
 - llama-3.3-70b (Groq free tier): 20% pass@1 (1/5 — rest hit 100k token/day limit)
-- Qwen3-235B-A22B (Cerebras free tier): 40% pass@1 (2/5 correct)
+- Qwen3-235B-A22B (Cerebras free tier): 40% pass@1 (2/5 correct, earlier run)
 
 ## Active feature slice
-None — all recent slices merged.
+None — all recent slices merged. Harness is stable.
 
 ## Documentation
 - documents/code_walkthroughs/code_flow.md — end-to-end harness walkthrough (single Anthropic provider)
-- documents/code_walkthroughs/2.llm_backend_expansion.md — multi-provider LLM abstraction layer (call-order walkthrough of all changes in PRs #13–#19)
+- documents/code_walkthroughs/2.llm_backend_expansion.md — multi-provider LLM abstraction layer
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
@@ -38,9 +45,19 @@ None — all recent slices merged.
 - Groq named provider (GROQ_API_KEY env var, auto base URL)
 - Llama text-format tool call recovery (<function/bash> and <function=bash[]> patterns)
 - Artifact copy errors silenced (ignore_dangling_symlinks, try/except per item)
+- Critic agent with configurable injection points (PR #26)
+- Assumption-checking prompt rules and critic prototype script (PR #25)
+- Narration instruction added to system prompt (PR #22)
+- Model cost entries + which-before-install prompt rule for Cerebras (PR #23)
+- Answer format matching instruction (PR #24)
+- Fix Haiku model name + harden LLM judge (PR #29)
+- Fix rubric fast-path regex + judge client routing (PR #30)
+- Fix critic client — _run_critic uses self.critic_client (PR #31)
+- Preflight model ping before eval starts (PR #32)
+- Skip cache_control block when system prompt is empty (PR #33)
 
 ## Pending slices
-- Critic agent (Option 3 from commit-early discussion)
+- Run a clean full Cerebras/QWEN benchmark (all fixes now in place)
 - Subagent for BLAST (Option 2 — reduces context bloat)
 - Curated bioinformatics tools (structured wrappers for BLAST, DESeq2, etc.)
 
@@ -59,8 +76,11 @@ None — all recent slices merged.
 - Groq: reads GROQ_API_KEY, auto base URL https://api.groq.com/openai/v1
 - Cerebras: use --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key $CEREBRAS_API_KEY
   Available models: qwen-3-235b-a22b-instruct-2507, llama3.1-8b, gpt-oss-120b
-- Cerebras free tier: 1M tokens/day, no rate limit issues observed yet
-- Llama text-format tool call recovery handles <function/bash> and <function=bash[]> patterns
-- Artifact copy silenced: dangling symlinks and missing scratch files no longer crash score write
-- All fixes applied via PRs #1-#17; all merged to main
+  Model name in run_eval.py cost table: qwen-3-235b-a22b-instruct-2507
+- Cerebras free tier: 1M tokens/day, no rate limit issues observed
+- Critic agent: --critic-injection-points after_final_answer --critic-model claude-haiku-4-5-20251001
+  The critic uses a separate Anthropic client when agent is on a non-Anthropic provider
+- Judge model defaults: claude-haiku-4-5-20251001 (Anthropic runs), same as agent model (others)
+- Preflight ping: validates all model endpoints before Docker starts — fail fast on bad model names
+- All fixes in PRs #1–#33, all merged to main
 - Docker image: bio-mystery-bench:latest (~4GB, cached locally)
