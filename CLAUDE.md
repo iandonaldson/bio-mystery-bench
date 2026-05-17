@@ -121,6 +121,21 @@ Pause and ask the human (Ian) before proceeding if:
 
 ---
 
+## README Maintenance
+
+After any change to the harness behaviour, CLI options, supported providers, or
+project structure, review `README.md` and update it before closing the PR:
+
+- CLI options table: add or update any new `--flags`
+- LLM Providers table: reflect any new or changed provider support
+- Cost Estimates table: update if model names or rates have changed
+- Architecture diagram: update if new modules were added
+- References: add a link to any new code walkthrough document
+
+A stale README is worse than no README — keep it accurate.
+
+---
+
 ## Test-Running Rules
 
 **CRITICAL — read before running any tests:**

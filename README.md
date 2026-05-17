@@ -98,7 +98,7 @@ The harness supports multiple LLM providers through a unified abstraction layer.
 | Anthropic (Claude) | `anthropic` | `ANTHROPIC_API_KEY` | Default. Prompt caching active. |
 | Groq | `groq` | `GROQ_API_KEY` | Fast LPU inference; pass `--model` for the Llama/Qwen model name. |
 | Azure AI Foundry | `azure` | `AZURE_AI_API_KEY` | Serverless open-source models (Phi-4, Llama, Mistral). Requires `--api-base-url`. |
-| Cerebras | `openai` | pass via `--api-key` | OpenAI-compat endpoint; 1M tokens/day free tier. |
+| Cerebras | `openai` | pass via `--api-key` | OpenAI-compat endpoint; free and paid tiers available. |
 | Ollama (local) | `ollama` | — | Free; runs open-weight models on your machine. |
 | Any OpenAI-compat | `openai` | `OPENAI_API_KEY` | Together AI, Mistral, Azure OpenAI, etc. |
 
@@ -190,7 +190,7 @@ Costs depend on the model. All figures assume 5 preview problems × 1 attempt.
 | Phi-4 | Azure AI Foundry | $0.125 | $0.50 | ~$0.05–0.15 |
 | Phi-4-mini | Azure AI Foundry | $0.025 | $0.095 | ~$0.01–0.05 |
 | Meta-Llama-3.3-70B-Instruct | Azure AI Foundry | $0.59 | $0.79 | ~$0.10–0.30 |
-| qwen3-235b-a22b | Cerebras | ~$6 | ~$6 | ~$0.50–1.00 |
+| qwen-3-235b-a22b-instruct-2507 | Cerebras | $0.60 | $0.60 | ~$0.30–0.60 |
 | any model | Ollama | free | free | $0 |
 
 > Azure AI Foundry prices are approximate and subject to change. Verify at [ai.azure.com/explore/models](https://ai.azure.com/explore/models) before large runs.
@@ -293,6 +293,11 @@ python scripts/run_eval.py [OPTIONS]
   --max-steps      INT                 Agent steps per attempt (default: 100)
   --results-dir    DIR                 Output directory (default: results/)
   --no-build                           Skip Docker image check
+  --critic-injection-points  POINT     Inject critic at this point (repeatable).
+                                       Only "after_final_answer" is currently supported.
+  --critic-model   MODEL               Model for the critic (default: same as agent model).
+                                       Use "claude-haiku-4-5-20251001" for a cross-provider
+                                       Anthropic critic when running a non-Anthropic agent.
 ```
 
 ---
@@ -511,3 +516,4 @@ To replicate Anthropic's published numbers you need the full 99-problem dataset 
 - [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python)
 - [Code walkthrough: harness end-to-end](documents/code_walkthroughs/code_flow.md)
 - [Code walkthrough: multi-provider LLM backend](documents/code_walkthroughs/2.llm_backend_expansion.md)
+- [Code walkthrough: critic agent, prompt engineering, API hardening](documents/code_walkthroughs/3.Accommodating_OpenAI_models.md)
