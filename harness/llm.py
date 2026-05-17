@@ -71,16 +71,10 @@ class AnthropicProvider(Provider):
         self._client = anthropic.Anthropic(api_key=api_key)
 
     def chat(self, model, system, messages, tools, max_tokens) -> LLMResponse:
-        system_with_cache = [
-            {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
-        ]
-        response = self._client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=system_with_cache,
-            messages=messages,
-            tools=tools,
-        )
+        kwargs: dict = dict(model=model, max_tokens=max_tokens, messages=messages, tools=tools)
+        if system:
+            kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+        response = self._client.messages.create(**kwargs)
         return _anthropic_response_to_llm_response(response)
 
 
