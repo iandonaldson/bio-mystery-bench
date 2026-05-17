@@ -105,7 +105,7 @@ def _llm_judge(predicted: str, rubric: str, client: Any) -> bool:
     try:
         if hasattr(client, "chat"):
             # Provider ABC path (LLMClient / harness.llm)
-            judge_model = getattr(client, "judge_model", "") or "claude-3-5-haiku-20241022"
+            judge_model = getattr(client, "judge_model", "") or "claude-haiku-4-5-20251001"
             response = client.chat(
                 model=judge_model,
                 system="",
@@ -117,7 +117,7 @@ def _llm_judge(predicted: str, rubric: str, client: Any) -> bool:
         else:
             # Raw anthropic.Anthropic backwards-compat path
             response = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-haiku-4-5-20251001",
                 max_tokens=10,
                 messages=[{"role": "user", "content": prompt}],
             )

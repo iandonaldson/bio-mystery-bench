@@ -50,7 +50,7 @@ _MODEL_COSTS: dict[str, tuple[float, float]] = {
     # Anthropic
     "claude-sonnet-4-6":                (3.0,    15.0),
     "claude-opus-4-7":                  (15.0,   75.0),
-    "claude-3-5-haiku-20241022":        (0.8,     4.0),
+    "claude-haiku-4-5-20251001":        (0.8,     4.0),
     # Groq (Llama family)
     "llama-3.3-70b-versatile":          (0.59,    0.79),
     "llama-3.3-70b-specdec":            (0.59,    0.79),
@@ -355,7 +355,7 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         )
         sys.exit(1)
 
-    resolved_judge = judge_model or ("claude-3-5-haiku-20241022" if provider == "anthropic" else model)
+    resolved_judge = judge_model or ("claude-haiku-4-5-20251001" if provider == "anthropic" else model)
     client = build_provider(provider, resolved_key, resolved_base_url, resolved_judge)
 
     # Build critic client — may be a different provider from the agent
