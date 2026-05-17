@@ -290,6 +290,14 @@ after each attempt in the CLI.
 
 ---
 
+## Completed Operational Slices
+
+### ✅ Cerebras/Qwen3 Clean Benchmark Run (2026-05-17)
+Results saved to `results/cerebras-qwen3-clean/`. pass@1: 0%, pass@5: 20% (1/5 problems).
+Note: hb022 and hb053 were mostly invalidated by Cerebras 429 queue-exceeded errors.
+
+---
+
 ## Pending Slices
 
 > **Before implementing any slice below**, decompose it into sub-slices per the
