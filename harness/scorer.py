@@ -74,7 +74,7 @@ def _parse_number(text: str) -> Optional[float]:
 
 
 _RUBRIC_ANSWER_RE = re.compile(
-    r"(?:(?:the\s+)?(?:expected\s+)?answer\s+is[:\s]+)([^\n.]+)",
+    r"(?:(?:the\s+)?(?:expected\s+)?answer\s+is[:\s]+)(.+?)(?=\s+Score\b|\n|$)",
     re.IGNORECASE,
 )
 

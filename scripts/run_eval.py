@@ -119,6 +119,7 @@ def _run_problem(
     resume: bool,
     results_dir: str,
     critic_client: Provider | None = None,
+    judge_client: Provider | None = None,
 ) -> None:
     """Run all attempts for a single problem. Safe to call from multiple threads."""
     pid = problem.id
@@ -176,7 +177,7 @@ def _run_problem(
 
         # Score
         predicted = extract_final_answer(result.final_message)
-        correct = score_answer(predicted, problem.answer_rubric, client)
+        correct = score_answer(predicted, problem.answer_rubric, judge_client or client)
         problem_scores[attempt] = correct
 
         if result.status == "resource_abort":
@@ -371,6 +372,18 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         else:
             critic_client = client  # same provider; critic_model handled inside AgentRun
 
+    # Build judge client — may be a different provider from the agent (e.g. Haiku via Anthropic
+    # while agent runs on Cerebras)
+    judge_client: Provider | None = None
+    if resolved_judge.startswith("claude-") and provider != "anthropic":
+        anthropic_key = _resolve_api_key("anthropic", None)
+        if not anthropic_key:
+            console.print("[red]Judge model is a Claude model but ANTHROPIC_API_KEY is not set.[/red]")
+            sys.exit(1)
+        judge_client = build_provider("anthropic", anthropic_key, None, resolved_judge)
+    else:
+        judge_client = client
+
     system_prompt = load_system_prompt()
 
     # Ensure Docker image exists
@@ -403,6 +416,7 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         resume=resume,
         results_dir=results_dir,
         critic_client=critic_client,
+        judge_client=judge_client,
     )
 
     with ThreadPoolExecutor(max_workers=parallel) as executor:
