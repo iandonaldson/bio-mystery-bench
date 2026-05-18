@@ -548,6 +548,14 @@ result = run.run()
 `AgentRun` holds all state for one attempt: the growing message list, step counter,
 and accumulated token counts.
 
+The system prompt (`prompts/system.txt`) also encodes three agent-behaviour rules added
+to reduce common failure modes: (a) **rc=0 + empty output ≠ tool absent** — the agent
+must use `which <tool>` or `<tool> --version` to confirm availability before reinstalling;
+(b) **remote BLAST empty output** — empty `blastn -remote` results mean no hits or a
+network timeout, not a missing binary; (c) **transient network retry** — HTTP 429/503
+or connection-reset errors from `wget`/`curl` should be retried up to 3 times with a
+30-second wait before switching sources.
+
 ### 4.2 Environment Context Probe
 
 Before the first API call, `run.run()` → `_loop()` → `_get_environment_context()` runs

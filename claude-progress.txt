@@ -1,15 +1,15 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-18 — ENV-1 to ENV-5: fixed container PATH so python3/pip/bedtools accessible on
-default shell; smoke test script added; 178/178 tests passing
+2026-05-18 — SP-1/SP-2 and NR-1/NR-2: system prompt rules added (rc=0+empty, remote
+BLAST, transient retry); 178/178 tests passing
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
-providers. 178/178 tests passing. Container PATH now includes /opt/conda/bin — python3,
-pip, bedtools, samtools and all conda-installed tools are available without full paths or
-manual conda activation. Smoke test (scripts/smoke_test_container.py) verifies all key
-tools return rc=0 in a fresh container.
+providers. 178/178 tests passing. Container PATH fix (ENV-1 to ENV-5) merged in PR #41.
+Three new system prompt rules now in prompts/system.txt: (a) rc=0+empty output ≠ tool
+absent, (b) remote BLAST empty result handling, (c) transient network retry (30s wait,
+up to 3 retries). All RERUN prerequisites are now merged or pending PR review.
 
 Preview benchmark results (all runs on 5-problem preview split):
 - Claude Sonnet 4.6 (Anthropic): 80% pass@1 (from earlier run)
@@ -30,7 +30,7 @@ extra attempts to be logged without updating totals). True pass@5 figures above 
 monitor observations of first 5 attempts per problem.
 
 ## Active feature slice
-None — ENV-1 to ENV-5 complete.
+None — SP-1/SP-2 and NR-1/NR-2 complete (this PR).
 
 ## Documentation
 - documents/code_walkthroughs/code_flow.md — end-to-end harness walkthrough (single Anthropic provider)
@@ -65,13 +65,15 @@ None — ENV-1 to ENV-5 complete.
 - Preflight model ping before eval starts (PR #32)
 - Skip cache_control block when system prompt is empty (PR #33)
 - Fix _clean_answer() underscore bug — SC-1 to SC-4 (PR #40)
-- Fix container PATH for python3/pip/bedtools — ENV-1 to ENV-5 (this PR)
+- Fix container PATH for python3/pip/bedtools — ENV-1 to ENV-5 (PR #41)
+- System prompt: rc=0+empty ≠ tool absent + remote BLAST guidance — SP-1/SP-2 (this PR)
+- System prompt: transient network retry rule (30s, up to 3×) — NR-1/NR-2 (this PR)
 
 ## Pending slices
-- Add system prompt rule: rc=0 + empty output ≠ tool missing (SP-1 to SP-2):
-  model misreads empty blastn remote output as "not installed"; wastes ~15 steps/attempt.
-- Transient network error retry guidance in system prompt (NR-1 to NR-3): add
-  explicit wait-30s-and-retry rule to prompts/system.txt for wget/curl 429/503 errors
+- NR-3: Manual check — confirm retry rule appears in trajectory's first logged user
+  message after the next benchmark run
+- Rate-limit retry trajectory logging (RL-1 through RL-5): thread logger into
+  OpenAIProvider.chat() and emit rate_limit_retry records on each 429 backoff
 - Rate-limit retry trajectory logging (RL-1 through RL-5): thread logger into
   OpenAIProvider.chat() and emit rate_limit_retry records on each 429 backoff
 - Subagent for BLAST (Option 2 — reduces context bloat)
