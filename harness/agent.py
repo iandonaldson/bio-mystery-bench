@@ -203,6 +203,7 @@ class AgentRun:
                     messages=self.messages,
                     tools=[BASH_TOOL, ABORT_TOOL],
                     max_tokens=self.config.max_tokens_per_step,
+                    logger=self.logger,
                 )
             except Exception as e:
                 self.logger.log("error", {"error": str(e)})
