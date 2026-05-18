@@ -497,3 +497,100 @@ class TestParseLlamaTextToolCall:
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].name == "bash"
         assert result.tool_calls[0].input == {"command": "ls /workspace/data"}
+
+
+# ---------------------------------------------------------------------------
+# OpenAIProvider retry / backoff
+# ---------------------------------------------------------------------------
+
+from unittest.mock import patch, call as mock_call
+import openai as _openai_mod
+
+from harness.llm import OpenAIProvider, _RATE_LIMIT_BACKOFF_DELAYS
+
+
+def _make_rate_limit_error():
+    """Build a minimal openai.RateLimitError without a real HTTP response."""
+    return _openai_mod.RateLimitError(
+        message="queue_exceeded",
+        response=MagicMock(status_code=429, headers={}),
+        body={"error": {"code": "queue_exceeded"}},
+    )
+
+
+def _make_success_response():
+    tc = MagicMock()
+    tc.id = "tc_ok"
+    tc.function.name = "bash"
+    tc.function.arguments = '{"command":"ls"}'
+    choice = MagicMock()
+    choice.finish_reason = "tool_calls"
+    choice.message.content = None
+    choice.message.tool_calls = [tc]
+    resp = MagicMock()
+    resp.choices = [choice]
+    usage = MagicMock()
+    usage.prompt_tokens = 10
+    usage.completion_tokens = 5
+    usage.prompt_tokens_details = None
+    resp.usage = usage
+    return resp
+
+
+class TestOpenAIProviderRateLimitBackoff:
+    def _make_provider(self):
+        p = OpenAIProvider.__new__(OpenAIProvider)
+        p._client = MagicMock()
+        return p
+
+    def test_succeeds_on_first_attempt_no_sleep(self):
+        p = self._make_provider()
+        p._client.chat.completions.create.return_value = _make_success_response()
+        with patch("harness.llm.time.sleep") as mock_sleep:
+            result = p.chat("m", "", [{"role": "user", "content": [{"type": "text", "text": "hi"}]}], [], 10)
+        mock_sleep.assert_not_called()
+        assert result.stop_reason == "tool_use"
+
+    def test_retries_once_on_429_then_succeeds(self):
+        p = self._make_provider()
+        p._client.chat.completions.create.side_effect = [
+            _make_rate_limit_error(),
+            _make_success_response(),
+        ]
+        with patch("harness.llm.time.sleep") as mock_sleep:
+            result = p.chat("m", "", [{"role": "user", "content": [{"type": "text", "text": "hi"}]}], [], 10)
+        mock_sleep.assert_called_once_with(_RATE_LIMIT_BACKOFF_DELAYS[0])
+        assert result.stop_reason == "tool_use"
+
+    def test_retries_all_three_delays_then_raises(self):
+        p = self._make_provider()
+        p._client.chat.completions.create.side_effect = _make_rate_limit_error()
+        with patch("harness.llm.time.sleep") as mock_sleep:
+            with pytest.raises(_openai_mod.RateLimitError):
+                p.chat("m", "", [{"role": "user", "content": [{"type": "text", "text": "hi"}]}], [], 10)
+        assert mock_sleep.call_count == len(_RATE_LIMIT_BACKOFF_DELAYS)
+        assert mock_sleep.call_args_list == [
+            mock_call(d) for d in _RATE_LIMIT_BACKOFF_DELAYS
+        ]
+
+    def test_total_attempts_is_four(self):
+        p = self._make_provider()
+        p._client.chat.completions.create.side_effect = _make_rate_limit_error()
+        with patch("harness.llm.time.sleep"):
+            with pytest.raises(_openai_mod.RateLimitError):
+                p.chat("m", "", [{"role": "user", "content": [{"type": "text", "text": "hi"}]}], [], 10)
+        assert p._client.chat.completions.create.call_count == len(_RATE_LIMIT_BACKOFF_DELAYS) + 1
+
+    def test_bad_request_error_not_retried(self):
+        p = self._make_provider()
+        bad_req = _openai_mod.BadRequestError(
+            message="bad",
+            response=MagicMock(status_code=400, headers={}),
+            body={},
+        )
+        p._client.chat.completions.create.side_effect = bad_req
+        with patch("harness.llm.time.sleep") as mock_sleep:
+            with pytest.raises(_openai_mod.BadRequestError):
+                p.chat("m", "", [{"role": "user", "content": [{"type": "text", "text": "hi"}]}], [], 10)
+        mock_sleep.assert_not_called()
+        assert p._client.chat.completions.create.call_count == 1

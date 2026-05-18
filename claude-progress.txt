@@ -1,27 +1,30 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-17 — PRs #29–#33 merged; all Cerebras/QWEN + critic + judge bugs resolved
+2026-05-17 — Clean Cerebras/Qwen3 benchmark run completed (all PRs #29–#33 merged)
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
-providers. Five bug-fix PRs merged today (#29–#33), resolving a cascade of failures
-that were blocking Cerebras + Qwen3-235B runs with an Anthropic critic/judge.
-168/168 tests passing.
+providers. 168/168 tests passing. Clean Cerebras/Qwen3-235B benchmark run completed.
 
-Root cause chain that was fixed:
-1. Critic was routing to the wrong client (used agent client instead of Anthropic critic client) — PR #31
-2. Haiku model was deprecated (claude-3-5-haiku-20241022 → 404) — PR #29/#32
-3. Empty system prompt caused Anthropic API 400: cache_control block sent on empty text — PR #33
-4. Preflight ping added so future model 404s fail fast at startup — PR #32
-
-Preview benchmark results so far:
+Preview benchmark results (all runs on 5-problem preview split):
 - Claude Sonnet 4.6 (Anthropic): 80% pass@1 (from earlier run)
 - llama-3.3-70b (Groq free tier): 20% pass@1 (1/5 — rest hit 100k token/day limit)
-- Qwen3-235B-A22B (Cerebras free tier): 40% pass@1 (2/5 correct, earlier run)
+- Qwen3-235B-A22B (Cerebras free tier): 0% pass@1, 20% pass@5 — see notes below
+
+Qwen3 clean run details (results/cerebras-qwen3-clean/, 2026-05-17):
+- pass@1: 0.0% | pass@5: 20.0% | Total cost: $1.14
+- hb002 (Bacillus licheniformis): SOLVED on attempts 3 and 4 ✓
+- hb020 (Homo sapiens PDB): 0/5 — model consistently guesses E. coli
+- recqgsfxqqodhjens (CTCF motif): 0/5 — resource aborts (MEME/R install confusion)
+- hb022 (pancreatic samples): 0/5 — mostly 429 Cerebras rate-limit errors; one run
+  got wrong format (Sample08 vs Sample_08) — known scorer strictness issue
+- hb053 (heat stress): 0/5 — mostly 429 Cerebras rate-limit errors
+NOTE: hb022 and hb053 results unreliable due to Cerebras queue-exceeded (429) errors
+hitting on first API call; run is not fully clean for those two problems.
 
 ## Active feature slice
-None — all recent slices merged. Harness is stable.
+None — Cerebras benchmark slice complete.
 
 ## Documentation
 - documents/code_walkthroughs/code_flow.md — end-to-end harness walkthrough (single Anthropic provider)
@@ -57,13 +60,15 @@ None — all recent slices merged. Harness is stable.
 - Skip cache_control block when system prompt is empty (PR #33)
 
 ## Pending slices
-- Run a clean full Cerebras/QWEN benchmark (all fixes now in place)
 - Subagent for BLAST (Option 2 — reduces context bloat)
 - Curated bioinformatics tools (structured wrappers for BLAST, DESeq2, etc.)
+- Re-run Cerebras hb022/hb053 when Cerebras traffic is lower (429 errors invalidated those results)
 
 ## Blockers / open questions for human
 - hb022 (pancreatic cancer sample labels) — model gets right samples but wrong format
   (outputs "Sample01" not "Sample_01"). Scorer is strict. human_solvable=False.
+- Cerebras 429 queue-exceeded errors: free tier gets rate-limited under high traffic;
+  hb022 and hb053 mostly failed to start. Re-run during off-peak hours for clean results.
 - Full 99-problem dataset requires HuggingFace approval
 - Groq Dev Tier upgrades temporarily unavailable (since ~Apr 2026, no ETA)
 - Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md

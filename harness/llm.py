@@ -8,10 +8,15 @@ provider-agnostic.
 
 import json
 import re
+import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+# Delays (seconds) between successive 429 retries: 1 min, 2 min, 4 min.
+# After the third wait the error is re-raised so the caller can log and abort.
+_RATE_LIMIT_BACKOFF_DELAYS = (60, 120, 240)
 
 
 # ---------------------------------------------------------------------------
@@ -127,29 +132,45 @@ class OpenAIProvider(Provider):
         )
         if oai_tools:
             kwargs["tools"] = oai_tools
-        try:
-            response = self._client.chat.completions.create(**kwargs)
-            return openai_response_to_llm_response(response)
-        except _openai.BadRequestError as e:
-            # Groq rejects malformed Llama tool calls (e.g. <function=bash[]>...).
-            # Recover by extracting the tool call from the failed_generation field.
-            error_body = getattr(e, "body", None) or {}
-            failed_gen = (error_body.get("error") or {}).get("failed_generation", "")
-            tool_call = _parse_llama_text_tool_call(failed_gen)
-            if tool_call:
-                return LLMResponse(
-                    stop_reason="tool_use",
-                    text="",
-                    tool_calls=[tool_call],
-                    usage=LLMUsage(),
-                    raw_content=[{
-                        "type": "tool_use",
-                        "id": tool_call.id,
-                        "name": tool_call.name,
-                        "input": tool_call.input,
-                    }],
+
+        for attempt in range(len(_RATE_LIMIT_BACKOFF_DELAYS) + 1):
+            try:
+                response = self._client.chat.completions.create(**kwargs)
+                return openai_response_to_llm_response(response)
+            except _openai.RateLimitError as e:
+                if attempt == len(_RATE_LIMIT_BACKOFF_DELAYS):
+                    print(
+                        f"[rate-limit] 429 on attempt {attempt + 1}/{attempt + 1} — "
+                        f"all retries exhausted, aborting."
+                    )
+                    raise
+                delay = _RATE_LIMIT_BACKOFF_DELAYS[attempt]
+                print(
+                    f"[rate-limit] 429 on attempt {attempt + 1}/"
+                    f"{len(_RATE_LIMIT_BACKOFF_DELAYS) + 1} — "
+                    f"waiting {delay}s before retry."
                 )
-            raise
+                time.sleep(delay)
+            except _openai.BadRequestError as e:
+                # Groq rejects malformed Llama tool calls (e.g. <function=bash[]>...).
+                # Recover by extracting the tool call from the failed_generation field.
+                error_body = getattr(e, "body", None) or {}
+                failed_gen = (error_body.get("error") or {}).get("failed_generation", "")
+                tool_call = _parse_llama_text_tool_call(failed_gen)
+                if tool_call:
+                    return LLMResponse(
+                        stop_reason="tool_use",
+                        text="",
+                        tool_calls=[tool_call],
+                        usage=LLMUsage(),
+                        raw_content=[{
+                            "type": "tool_use",
+                            "id": tool_call.id,
+                            "name": tool_call.name,
+                            "input": tool_call.input,
+                        }],
+                    )
+                raise
 
 
 # ---------------------------------------------------------------------------
