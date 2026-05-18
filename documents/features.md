@@ -351,20 +351,14 @@ Sub-slices:
 - ENV-4 ✅: Audited — bedtools=2.31 present in Dockerfile; issue was PATH only
 - ENV-5 ✅: bedtools included in smoke test
 
-### Add system prompt rule: rc=0 with empty output ≠ tool missing (SP-1 to SP-2)
-When `blastn -db nt -remote` returned rc=0 with empty stdout (network timeout / no
-hits), the model incorrectly concluded "blastn not available" and spent ~15 steps per
-attempt reinstalling it. The system prompt has no guidance on interpreting this case.
+### ✅ Add system prompt rule: rc=0 with empty output ≠ tool missing (SP-1 to SP-2)
+Added to `prompts/system.txt` under "General approach" (items 3a and companion):
 
 Sub-slices:
-- SP-1: Add a rule to `prompts/system.txt` under "General approach", e.g.:
-  > A command that exits with rc=0 and empty output ran successfully but produced no
-  > results — do not assume the tool is missing. Check stderr and try a simpler test
-  > command (e.g. `blastn -version`) to confirm availability before reinstalling.
-- SP-2: Add a companion rule for remote BLAST specifically:
-  > Remote BLAST (`-db nt -remote`) can return empty output due to network timeouts.
-  > If output is empty, verify with `blastn -version` first, then retry the query or
-  > switch to a local approach before concluding the tool is absent.
+- SP-1 ✅: Added rule — rc=0 + empty stdout means no results, not tool absent; use
+  `which <tool>` or `<tool> --version` before reinstalling.
+- SP-2 ✅: Added remote BLAST companion — empty `blastn -remote` output means no hits
+  or network timeout; verify with `blastn -version` before reinstalling or retrying.
 
 ### Bug: extract_final_answer strips underscores from identifiers
 `_clean_answer()` in `harness/scorer.py` (line 28) applies
@@ -387,23 +381,16 @@ Sub-slices:
 - SC-3: Regression test: bold markers `**answer**` still stripped correctly
 - SC-4: Re-score hb022 with fixed extractor; update results note in features.md
 
-### Transient Network Error Retry Guidance in System Prompt
-The system prompt (`prompts/system.txt`) has no instructions for handling transient
-network errors from `wget`, `curl`, or web APIs (429, 503, connection reset). The model
-currently improvises retry behaviour inconsistently across attempts.
-
-Fix: add an explicit retry rule to `prompts/system.txt` under the "General approach"
-section, e.g.:
-
-> If a `wget`, `curl`, or API call returns a transient error (429, 503, connection
-> reset, or empty response), wait 30 seconds and retry up to 3 times before switching
-> to an alternative approach or mirror.
+### ✅ Transient Network Error Retry Guidance in System Prompt (NR-1 to NR-3)
+Added retry guidance to `prompts/system.txt` under "General approach" (item 4a):
+wait 30 s and retry up to 3 times on HTTP 429/503 / connection-reset before
+switching sources.
 
 Sub-slices:
-- NR-1: Add the retry rule to `prompts/system.txt`
-- NR-2: Add a note to `documents/code_walkthroughs/code_flow.md` describing the rule
-- NR-3: Verify the rule appears in a trajectory's user message (system prompt is
-  cache-controlled; confirm it is present in at least one logged run)
+- NR-1 ✅: Added retry rule to `prompts/system.txt`
+- NR-2 ✅: Added note to `documents/code_walkthroughs/code_flow.md` §4.1
+- NR-3: Manual check — confirm rule appears in a trajectory's first logged user
+  message after the next benchmark run (system prompt is cache-controlled).
 
 ### Rate-Limit Retry Trajectory Logging
 Log each Cerebras (or any OpenAI-compatible) 429 backoff event to the trajectory file so

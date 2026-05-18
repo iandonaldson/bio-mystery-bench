@@ -94,7 +94,16 @@ Never call a tool without this brief narration first.
 1. Assess environment and data (steps 1–2 above)
 2. Form a hypothesis about what analysis is needed
 3. Choose appropriate tools given available resources
+3a. A command that exits rc=0 with empty stdout ran successfully but produced no
+    results — do not assume the tool is absent. Use `which <tool>` or `<tool> --version`
+    to confirm availability before attempting reinstallation.
+    Remote BLAST (`blastn -db nt -remote`) can return empty output on network timeout;
+    if output is empty, verify with `blastn -version` first, then retry the query or
+    switch to a local approach before concluding the tool is absent.
 4. Work step by step, checking intermediate results
+4a. If a `wget`, `curl`, or API call returns a transient error (HTTP 429, 503,
+    connection reset, or empty response), wait 30 seconds and retry up to 3 times
+    before switching to an alternative source or approach.
 5. Cross-validate findings with multiple approaches when possible
 6. Before stating your final answer, explicitly check any assumptions your
    analysis depends on. In particular:
