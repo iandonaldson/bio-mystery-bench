@@ -1,13 +1,16 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-19 — RL-1 to RL-5: rate-limit retry trajectory logging complete; 181/181 tests passing
+2026-05-19 — RBfix-1/RBfix-2: resource_abort added to is_attempt_complete() terminal
+statuses; --resume no longer re-runs resource_abort attempts; 182/182 tests passing.
+RL-1 to RL-5 marked complete in features.md (code was already merged in PR #43).
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
-providers. 181/181 tests passing. RL-1 to RL-5 complete: OpenAIProvider.chat() now
-accepts an optional logger parameter and emits a rate_limit_retry record to the
-trajectory JSONL before each 429 backoff sleep. AgentRun._loop() wires logger=self.logger
+providers. 182/182 tests passing. is_attempt_complete() now treats resource_abort as
+terminal, so --resume correctly skips attempts aborted by the agent. RL-1 to RL-5
+(rate-limit retry trajectory logging) were completed in PR #43 and are now marked
+done in features.md. AgentRun._loop() wires logger=self.logger
 through on every client.chat() call.
 
 Preview benchmark results (all runs on 5-problem preview split):
@@ -65,9 +68,10 @@ None — RL-1 to RL-5 complete (this PR).
 - Skip cache_control block when system prompt is empty (PR #33)
 - Fix _clean_answer() underscore bug — SC-1 to SC-4 (PR #40)
 - Fix container PATH for python3/pip/bedtools — ENV-1 to ENV-5 (PR #41)
-- System prompt: rc=0+empty ≠ tool absent + remote BLAST guidance — SP-1/SP-2 (this PR)
+- System prompt: rc=0+empty ≠ tool absent + remote BLAST guidance — SP-1/SP-2 (PR #42)
 - System prompt: transient network retry rule (30s, up to 3×) — NR-1/NR-2 (PR #42)
-- Rate-limit retry trajectory logging — RL-1 to RL-5 (this PR)
+- Rate-limit retry trajectory logging — RL-1 to RL-5 (PR #43)
+- Fix --resume re-runs resource_abort — RBfix-1/RBfix-2 (this PR)
 
 ## Pending slices
 - NR-3: Manual check — confirm retry rule appears in trajectory's first logged user
@@ -75,10 +79,8 @@ None — RL-1 to RL-5 complete (this PR).
 - Subagent for BLAST (Option 2 — reduces context bloat)
 - Curated bioinformatics tools (structured wrappers for BLAST, DESeq2, etc.)
 - Comparative re-run benchmark (RERUN-1 to RERUN-4): run preview eval on both
-  Claude Sonnet-4-6 and Cerebras/Qwen3 with critic enabled, after all ENV/SC/SP/NR
-  fixes are merged. First apples-to-apples comparison with fixed harness.
-- Fix scores.json scoring bug: --resume re-runs resource_abort attempts, causing
-  total_attempts counter and pass_at_N key to be inconsistent with actual attempt count
+  Claude Sonnet-4-6 and Cerebras/Qwen3 with critic enabled, after all fixes merged.
+  First apples-to-apples comparison with fully fixed harness.
 
 ## Blockers / open questions for human
 - hb022 (pancreatic cancer sample labels) — model consistently uses Sample01 format
@@ -92,7 +94,7 @@ None — RL-1 to RL-5 complete (this PR).
 - Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md
 
 ## Test status
-181/181 tests passing.
+182/182 tests passing.
 
 ## Notes for next agent session
 - Provider flags: --provider anthropic|openai|ollama|groq, --api-base-url, --api-key, --judge-model
