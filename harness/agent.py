@@ -77,6 +77,46 @@ ABORT_TOOL = {
     },
 }
 
+BLAST_TOOL = {
+    "name": "blast_search",
+    "description": (
+        "Run a BLAST search and return a compact summary of the top hits. "
+        "Full tabular results (outfmt 6) are saved to /workspace/scratch/blast_results.txt. "
+        "Use this instead of calling blastn/blastp directly to avoid large outputs "
+        "consuming your context window. "
+        "query must be a FASTA file path inside the container (e.g. /workspace/scratch/query.fasta). "
+        "database: 'nt' or 'nr' for NCBI remote BLAST; or a local BLASTDB path. "
+        "program: blastn (default), blastp, blastx, tblastn, tblastx."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Path to FASTA query file in the container.",
+            },
+            "database": {
+                "type": "string",
+                "description": "BLAST database name (e.g. 'nt', 'nr') or local BLASTDB path.",
+            },
+            "program": {
+                "type": "string",
+                "description": "BLAST program to use (default: blastn).",
+                "enum": ["blastn", "blastp", "blastx", "tblastn", "tblastx"],
+            },
+            "max_hits": {
+                "type": "integer",
+                "description": "Maximum number of hits to show in the summary (default: 10).",
+            },
+            "extra_args": {
+                "type": "string",
+                "description": "Optional extra BLAST flags (e.g. '-perc_identity 90 -evalue 1e-5').",
+            },
+        },
+        "required": ["query", "database"],
+    },
+}
+
 CRITIC_SYSTEM_PROMPT = """\
 You are a scientific reasoning auditor reviewing an AI agent's solution to a
 computational biology problem. Your job is to identify assumptions the agent
@@ -201,7 +241,7 @@ class AgentRun:
                     model=self.config.model,
                     system=self.system_prompt,
                     messages=self.messages,
-                    tools=[BASH_TOOL, ABORT_TOOL],
+                    tools=[BASH_TOOL, ABORT_TOOL, BLAST_TOOL],
                     max_tokens=self.config.max_tokens_per_step,
                     logger=self.logger,
                 )
@@ -307,6 +347,54 @@ class AgentRun:
                             self.steps, self.config.max_steps, self.input_tokens
                         )
 
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tool_call.id,
+                            "content": result_text,
+                            "is_error": rc != 0,
+                        })
+
+                    if tool_call.name == "blast_search":
+                        query    = tool_call.input.get("query", "")
+                        database = tool_call.input.get("database", "nt")
+                        program  = tool_call.input.get("program", "blastn")
+                        max_hits = int(tool_call.input.get("max_hits", 10))
+                        extra    = tool_call.input.get("extra_args", "") or ""
+                        remote   = "-remote" if database in ("nt", "nr") else ""
+                        out_file = "/workspace/scratch/blast_results.txt"
+
+                        command = (
+                            f"{program} -db {database} -query {query} "
+                            f"-outfmt 6 -max_target_seqs {max(max_hits * 2, 50)} "
+                            f"{remote} {extra} | tee {out_file}"
+                        ).strip()
+
+                        self.logger.log("tool_call", {"blast_command": command})
+                        try:
+                            stdout, stderr, rc = self.container.exec_command(
+                                command,
+                                timeout=self.config.step_timeout_seconds,
+                            )
+                        except TimeoutError as e:
+                            stdout, stderr, rc = "", str(e), -1
+                        except Exception as e:
+                            stdout, stderr, rc = "", str(e), -1
+
+                        summary = _summarize_blast_output(stdout, max_hits)
+                        result_text = (
+                            f"BLAST Summary ({program} vs {database}):\n{summary}\n\n"
+                            f"Full results saved to {out_file}"
+                        )
+                        if rc != 0:
+                            result_text = f"BLAST error (rc={rc}):\n{stderr[:2000]}\n\n" + result_text
+                        self.logger.log("tool_result", {
+                            "blast_command": command,
+                            "summary": summary,
+                            "returncode": rc,
+                        })
+                        result_text += "\n\n" + _progress_footer(
+                            self.steps, self.config.max_steps, self.input_tokens
+                        )
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": tool_call.id,
@@ -505,6 +593,23 @@ def _progress_footer(steps_used: int, max_steps: int, input_tokens: int) -> str:
     if urgency:
         footer += f"\n{urgency}"
     return footer
+
+
+def _summarize_blast_output(stdout: str, max_hits: int = 10) -> str:
+    """Parse BLAST tabular output (outfmt 6) into a compact summary table."""
+    lines = [l for l in stdout.strip().splitlines() if l and not l.startswith("#")]
+    if not lines:
+        return "No BLAST hits found."
+    header = f"{'Hit ID':<45} {'Identity':>8} {'E-value':>12} {'Bitscore':>9}"
+    sep = "-" * 76
+    rows = [header, sep]
+    for line in lines[:max_hits]:
+        parts = line.split("\t")
+        if len(parts) < 12:
+            continue
+        sseqid, pident, evalue, bitscore = parts[1], parts[2], parts[10], parts[11]
+        rows.append(f"{sseqid[:45]:<45} {pident:>7}% {evalue:>12} {bitscore.strip():>9}")
+    return "\n".join(rows)
 
 
 def _format_result(stdout: str, stderr: str, rc: int, max_chars: int = 8000) -> str:

@@ -9,10 +9,12 @@ from harness.agent import (
     _extract_text,
     _format_result,
     _handle_abort,
+    _summarize_blast_output,
     ResourceEstimate,
     AgentResult,
     BASH_TOOL,
     ABORT_TOOL,
+    BLAST_TOOL,
 )
 
 
@@ -629,3 +631,90 @@ class TestOpenAIProviderRateLimitBackoff:
             # logger=None (default) must not raise AttributeError
             result = p.chat("m", "", [{"role": "user", "content": [{"type": "text", "text": "hi"}]}], [], 10)
         assert result.stop_reason == "tool_use"
+
+
+# ---------------------------------------------------------------------------
+# _summarize_blast_output  (B-1)
+# ---------------------------------------------------------------------------
+
+def _blast_row(sseqid="NM_001234.1", pident="98.50", evalue="1e-120", bitscore="450"):
+    """Build a minimal valid BLAST outfmt-6 row (12 tab-separated fields)."""
+    return "\t".join([
+        "query1", sseqid, pident, "200", "3", "0", "1", "200", "10", "209", evalue, bitscore
+    ])
+
+
+class TestSummarizeBlastOutput:
+    def test_empty_string_returns_no_hits(self):
+        assert _summarize_blast_output("") == "No BLAST hits found."
+
+    def test_whitespace_only_returns_no_hits(self):
+        assert _summarize_blast_output("   \n  ") == "No BLAST hits found."
+
+    def test_comment_only_lines_return_no_hits(self):
+        inp = "# BLASTN 2.14.0\n# Fields: query id, subject id, ...\n"
+        assert _summarize_blast_output(inp) == "No BLAST hits found."
+
+    def test_three_valid_rows_produce_header_and_three_data_lines(self):
+        rows = "\n".join([_blast_row("Hit_A"), _blast_row("Hit_B"), _blast_row("Hit_C")])
+        result = _summarize_blast_output(rows)
+        lines = result.splitlines()
+        assert lines[0].startswith("Hit ID")       # header
+        assert lines[1].startswith("-")             # separator
+        assert len([l for l in lines[2:] if l]) == 3
+
+    def test_max_hits_limits_output_rows(self):
+        rows = "\n".join(_blast_row(f"Hit_{i}") for i in range(5))
+        result = _summarize_blast_output(rows, max_hits=2)
+        data_lines = [l for l in result.splitlines() if l and not l.startswith("Hit ID") and not l.startswith("-")]
+        assert len(data_lines) == 2
+
+    def test_malformed_line_skipped_no_crash(self):
+        inp = "only\ttwo\tfields\n" + _blast_row("ValidHit")
+        result = _summarize_blast_output(inp)
+        assert "ValidHit" in result
+        # malformed line has too few fields — should not appear as a data row
+        lines = [l for l in result.splitlines() if l and not l.startswith("Hit ID") and not l.startswith("-")]
+        assert len(lines) == 1
+
+    def test_hit_id_truncated_at_45_chars(self):
+        long_id = "A" * 60
+        result = _summarize_blast_output(_blast_row(sseqid=long_id))
+        # The 45-char truncation means the full 60-char id should not appear verbatim
+        assert long_id not in result
+        assert "A" * 45 in result
+
+    def test_evalue_and_bitscore_appear_in_output(self):
+        result = _summarize_blast_output(_blast_row(evalue="2e-50", bitscore="300"))
+        assert "2e-50" in result
+        assert "300" in result
+
+
+# ---------------------------------------------------------------------------
+# BLAST_TOOL definition  (B-2)
+# ---------------------------------------------------------------------------
+
+class TestBlastToolDefinition:
+    def test_name_is_blast_search(self):
+        assert BLAST_TOOL["name"] == "blast_search"
+
+    def test_required_fields_are_query_and_database(self):
+        required = BLAST_TOOL["input_schema"]["required"]
+        assert "query" in required
+        assert "database" in required
+
+    def test_program_enum_has_five_entries(self):
+        props = BLAST_TOOL["input_schema"]["properties"]
+        assert "program" in props
+        assert set(props["program"]["enum"]) == {
+            "blastn", "blastp", "blastx", "tblastn", "tblastx"
+        }
+
+    def test_max_hits_property_present(self):
+        props = BLAST_TOOL["input_schema"]["properties"]
+        assert "max_hits" in props
+        assert props["max_hits"]["type"] == "integer"
+
+    def test_extra_args_property_present(self):
+        props = BLAST_TOOL["input_schema"]["properties"]
+        assert "extra_args" in props

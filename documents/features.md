@@ -418,12 +418,19 @@ Sub-slices:
 - RBfix-2 ✅: Regression test — parametrize `test_returns_true_for_terminal_statuses`
   to include `"resource_abort"`
 
-### BLAST Subagent
-Offload BLAST queries to a separate subprocess/subagent to prevent long BLAST
-stdout from consuming the agent's context window. Decompose into:
-- B-1: Wrapper script that runs BLAST and writes results to scratch
-- B-2: Agent tool that invokes the wrapper and returns a summary
-- B-3: Tests with mock BLAST output
+### ✅ BLAST Subagent (B-1 to B-3)
+Offload BLAST queries to reduce context-window consumption. The `blast_search` tool
+runs the query inside the container, tees full tabular output to
+`/workspace/scratch/blast_results.txt`, and returns a compact hit-summary table
+(top-N rows, human-readable) to the agent.
+
+Sub-slices:
+- B-1 ✅: `_summarize_blast_output()` helper in `harness/agent.py` — parses outfmt-6
+  tabular stdout into a compact table; handles empty/comment/malformed lines
+- B-2 ✅: `BLAST_TOOL` constant + dispatch branch in `AgentRun._loop()`; tool added to
+  tools list; one-line guidance added to `prompts/system.txt`
+- B-3 ✅: 13 unit tests in `tests/test_agent_helpers.py` (`TestSummarizeBlastOutput`,
+  `TestBlastToolDefinition`); 195/195 tests passing
 
 ### Curated Bioinformatics Tool Wrappers
 Structured wrappers for tools that commonly produce large or hard-to-parse output
