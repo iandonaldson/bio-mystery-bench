@@ -594,3 +594,38 @@ class TestOpenAIProviderRateLimitBackoff:
                 p.chat("m", "", [{"role": "user", "content": [{"type": "text", "text": "hi"}]}], [], 10)
         mock_sleep.assert_not_called()
         assert p._client.chat.completions.create.call_count == 1
+
+    def test_logger_called_on_429_with_correct_fields(self):
+        p = self._make_provider()
+        p._client.chat.completions.create.side_effect = [
+            _make_rate_limit_error(),
+            _make_success_response(),
+        ]
+        mock_logger = MagicMock()
+        with patch("harness.llm.time.sleep"):
+            p.chat("m", "", [{"role": "user", "content": [{"type": "text", "text": "hi"}]}], [], 10,
+                   logger=mock_logger)
+        mock_logger.log.assert_called_once_with(
+            "rate_limit_retry",
+            {"attempt": 1, "wait_seconds": _RATE_LIMIT_BACKOFF_DELAYS[0], "provider": "openai"},
+        )
+
+    def test_logger_not_called_on_success(self):
+        p = self._make_provider()
+        p._client.chat.completions.create.return_value = _make_success_response()
+        mock_logger = MagicMock()
+        with patch("harness.llm.time.sleep"):
+            p.chat("m", "", [{"role": "user", "content": [{"type": "text", "text": "hi"}]}], [], 10,
+                   logger=mock_logger)
+        mock_logger.log.assert_not_called()
+
+    def test_no_logger_does_not_raise_on_429(self):
+        p = self._make_provider()
+        p._client.chat.completions.create.side_effect = [
+            _make_rate_limit_error(),
+            _make_success_response(),
+        ]
+        with patch("harness.llm.time.sleep"):
+            # logger=None (default) must not raise AttributeError
+            result = p.chat("m", "", [{"role": "user", "content": [{"type": "text", "text": "hi"}]}], [], 10)
+        assert result.stop_reason == "tool_use"

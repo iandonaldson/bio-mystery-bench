@@ -63,6 +63,7 @@ class Provider(ABC):
         messages: list[dict],
         tools: list[dict],
         max_tokens: int,
+        logger=None,
     ) -> LLMResponse: ...
 
 
@@ -75,7 +76,7 @@ class AnthropicProvider(Provider):
         import anthropic
         self._client = anthropic.Anthropic(api_key=api_key)
 
-    def chat(self, model, system, messages, tools, max_tokens) -> LLMResponse:
+    def chat(self, model, system, messages, tools, max_tokens, logger=None) -> LLMResponse:
         kwargs: dict = dict(model=model, max_tokens=max_tokens, messages=messages, tools=tools)
         if system:
             kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
@@ -121,7 +122,7 @@ class OpenAIProvider(Provider):
         import openai
         self._client = openai.OpenAI(api_key=api_key, base_url=base_url)
 
-    def chat(self, model, system, messages, tools, max_tokens) -> LLMResponse:
+    def chat(self, model, system, messages, tools, max_tokens, logger=None) -> LLMResponse:
         import openai as _openai
         oai_messages = anthropic_to_openai_messages(messages, system)
         oai_tools = [anthropic_tool_to_openai(t) for t in tools] if tools else None
@@ -150,6 +151,12 @@ class OpenAIProvider(Provider):
                     f"{len(_RATE_LIMIT_BACKOFF_DELAYS) + 1} — "
                     f"waiting {delay}s before retry."
                 )
+                if logger is not None:
+                    logger.log("rate_limit_retry", {
+                        "attempt": attempt + 1,
+                        "wait_seconds": delay,
+                        "provider": "openai",
+                    })
                 time.sleep(delay)
             except _openai.BadRequestError as e:
                 # Groq rejects malformed Llama tool calls (e.g. <function=bash[]>...).

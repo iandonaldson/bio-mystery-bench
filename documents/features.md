@@ -203,6 +203,7 @@ Each record has four fields:
 | `tool_result` | `_loop()` | Full stdout, stderr, returncode |
 | `status` | `_result()` / `_handle_abort()` | Terminal status + final message / resource estimate |
 | `error` | `_loop()` | API exception message |
+| `rate_limit_retry` | `OpenAIProvider.chat()` | `attempt` (1-based), `wait_seconds`, `provider` |
 
 ### `is_attempt_complete(results_dir, problem_id, attempt)`
 Returns `True` if the trajectory file exists and contains a `status` record with
