@@ -67,6 +67,8 @@ None — re-run Cerebras benchmark slice complete.
   _clean_answer() in harness/scorer.py line 28 nukes underscores in names like
   Sample_01. Confirmed wrong-scored hb022 attempts 2 and 5. Fix paired-delimiter
   regex and add regression tests.
+- Transient network error retry guidance in system prompt (NR-1 to NR-3): add
+  explicit wait-30s-and-retry rule to prompts/system.txt for wget/curl 429/503 errors
 - Rate-limit retry trajectory logging (RL-1 through RL-5): thread logger into
   OpenAIProvider.chat() and emit rate_limit_retry records on each 429 backoff
 - Subagent for BLAST (Option 2 — reduces context bloat)

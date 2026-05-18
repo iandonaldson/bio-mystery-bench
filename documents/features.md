@@ -345,6 +345,24 @@ Sub-slices:
 - SC-3: Regression test: bold markers `**answer**` still stripped correctly
 - SC-4: Re-score hb022 with fixed extractor; update results note in features.md
 
+### Transient Network Error Retry Guidance in System Prompt
+The system prompt (`prompts/system.txt`) has no instructions for handling transient
+network errors from `wget`, `curl`, or web APIs (429, 503, connection reset). The model
+currently improvises retry behaviour inconsistently across attempts.
+
+Fix: add an explicit retry rule to `prompts/system.txt` under the "General approach"
+section, e.g.:
+
+> If a `wget`, `curl`, or API call returns a transient error (429, 503, connection
+> reset, or empty response), wait 30 seconds and retry up to 3 times before switching
+> to an alternative approach or mirror.
+
+Sub-slices:
+- NR-1: Add the retry rule to `prompts/system.txt`
+- NR-2: Add a note to `documents/code_walkthroughs/code_flow.md` describing the rule
+- NR-3: Verify the rule appears in a trajectory's user message (system prompt is
+  cache-controlled; confirm it is present in at least one logged run)
+
 ### Rate-Limit Retry Trajectory Logging
 Log each Cerebras (or any OpenAI-compatible) 429 backoff event to the trajectory file so
 retry behaviour is observable without relying on benchmark stdout. Decompose into:
