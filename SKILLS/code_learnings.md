@@ -161,3 +161,49 @@ missing guard), immediately grep the whole codebase for the same pattern:
 grep -rn "self\.client\.chat\|client\.chat" harness/
 ```
 Fix all instances before declaring the bug resolved.
+
+---
+
+## L-08: Diagnose 429s before choosing a fix — queue congestion ≠ quota exhaustion
+
+**Lesson (2026-05-18):** Cerebras returned `429 queue_exceeded` on the Qwen3 benchmark
+run. The initial instinct was "we hit a rate limit". In fact, actual usage was 5.7 RPM
+and ~35K TPM against limits of 200 RPM and 200K TPM — well under 10% of quota.
+The error was infrastructure queue congestion, not per-account exhaustion.
+
+**Diagnostic steps before implementing a fix:**
+1. Calculate actual RPM/TPM from the trajectory (steps ÷ wall minutes, tokens ÷ wall minutes).
+2. Compare against account limits — read `x-ratelimit-limit-*` headers via
+   `scripts/check_cerebras_limits.py` (makes a live minimal call and prints all headers).
+3. Check the Cerebras status page (https://isdown.app/status/cerebras-inference) for
+   active incidents affecting the model you are using.
+
+**`queue_exceeded` (code `queue_exceeded`, param `queue`):** transient infrastructure
+congestion. Exponential backoff (60s/120s/240s) is the right fix — already implemented
+in `OpenAIProvider.chat()`.
+
+**Genuine quota exhaustion:** `x-ratelimit-remaining-*` headers near zero. Backoff
+won't help; you need to wait for the bucket to replenish (`x-ratelimit-reset-*` tells
+you when) or reduce parallelism.
+
+---
+
+## L-09: Always run pytest from the worktree directory, not the main repo
+
+**Lesson (2026-05-18):** When working in a git worktree, running `pytest` from
+`/path/to/main-repo` collects tests from the *main repo's* `tests/` directory, not
+the worktree's. New tests added to the worktree are silently ignored and the count
+looks unchanged (168 passed instead of 173).
+
+**Rule:** Always `cd` to the worktree root before running tests, or use the absolute
+path explicitly:
+```bash
+# Wrong — runs main repo tests, misses worktree changes:
+cd /Users/ian/Documents/Claude/bio-mystery-bench && python3 -m pytest tests/
+
+# Right — runs worktree tests:
+python3 -m pytest tests/   # from inside the worktree (default shell cwd)
+```
+The worktree's default shell working directory is already the worktree root, so plain
+`python3 -m pytest tests/` is correct. Only add an explicit `cd` if you need the main
+repo.
