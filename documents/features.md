@@ -324,6 +324,50 @@ Tests: `TestOpenAIProviderRateLimitBackoff` in `tests/test_agent_helpers.py` (5 
 > elephant carpaccio rule in `SKILLS/code_learnings.md` (L-05). Each sub-slice
 > needs its own unit test; do not rely solely on integration testing.
 
+### Fix container PATH so Python/pip are available on default shell (ENV-1 to ENV-3)
+`python3` and `pip` are installed inside the micromamba/conda environment but are
+not on the default `$PATH`. Every attempt that needs Python must either activate the
+environment first (`micromamba activate base`) or use full paths
+(`/opt/conda/bin/python3`). The system prompt claims pip and Python are pre-installed
+but does not tell the model how to reach them. Confirmed impact: recqgsfxqqodhjens
+aborted 4/7 attempts; hb022 attempt 3 also hit rc=127 for python3.
+
+Sub-slices:
+- ENV-1: Audit `docker/Dockerfile` (or entrypoint script) — confirm where Python/pip
+  live and why they are not on `$PATH` by default
+- ENV-2: Fix: either add `/opt/conda/bin` to `$PATH` in the Dockerfile `ENV` directive,
+  or add `micromamba activate base` to the container entrypoint so the conda env is
+  active when the agent's bash commands run
+- ENV-3: Add a smoke-test bash command to the test suite (or a manual verification step)
+  that starts a fresh container and confirms `python3 --version`, `pip --version`,
+  `bedtools --version` all succeed with rc=0 on the default PATH
+
+### Fix bedtools PATH / installation in Docker image (ENV-4 to ENV-5)
+`bedtools getfasta` returns rc=127 in recqgsfxqqodhjens trajectories despite being
+listed as pre-installed in the system prompt. Either bedtools is absent from the image
+or is installed outside `$PATH`. This caused the agent to abort 4/7 attempts on the
+CTCF motif problem instead of extracting peak sequences.
+
+Sub-slices:
+- ENV-4: Audit `docker/Dockerfile` — confirm whether bedtools is installed and at what
+  path; if missing, add `micromamba install -c bioconda bedtools` to the Dockerfile
+- ENV-5: Include bedtools in the ENV-3 smoke test
+
+### Add system prompt rule: rc=0 with empty output ≠ tool missing (SP-1 to SP-2)
+When `blastn -db nt -remote` returned rc=0 with empty stdout (network timeout / no
+hits), the model incorrectly concluded "blastn not available" and spent ~15 steps per
+attempt reinstalling it. The system prompt has no guidance on interpreting this case.
+
+Sub-slices:
+- SP-1: Add a rule to `prompts/system.txt` under "General approach", e.g.:
+  > A command that exits with rc=0 and empty output ran successfully but produced no
+  > results — do not assume the tool is missing. Check stderr and try a simpler test
+  > command (e.g. `blastn -version`) to confirm availability before reinstalling.
+- SP-2: Add a companion rule for remote BLAST specifically:
+  > Remote BLAST (`-db nt -remote`) can return empty output due to network timeouts.
+  > If output is empty, verify with `blastn -version` first, then retry the query or
+  > switch to a local approach before concluding the tool is absent.
+
 ### Bug: extract_final_answer strips underscores from identifiers
 `_clean_answer()` in `harness/scorer.py` (line 28) applies
 `re.sub(r"\*{1,2}|_{1,2}", "", text)` to strip markdown bold/italic markers.
