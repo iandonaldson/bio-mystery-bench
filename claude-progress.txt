@@ -1,30 +1,33 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-17 — Clean Cerebras/Qwen3 benchmark run completed (all PRs #29–#33 merged)
+2026-05-18 — Re-run clean Cerebras/Qwen3 benchmark completed (results/cerebras-qwen3-clean-2/)
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
-providers. 168/168 tests passing. Clean Cerebras/Qwen3-235B benchmark run completed.
+providers. 173/173 tests passing. Second clean Cerebras/Qwen3-235B benchmark run completed
+with exponential backoff active throughout.
 
 Preview benchmark results (all runs on 5-problem preview split):
 - Claude Sonnet 4.6 (Anthropic): 80% pass@1 (from earlier run)
 - llama-3.3-70b (Groq free tier): 20% pass@1 (1/5 — rest hit 100k token/day limit)
-- Qwen3-235B-A22B (Cerebras free tier): 0% pass@1, 20% pass@5 — see notes below
+- Qwen3-235B-A22B (Cerebras free tier): 0% pass@1, 60% pass@5 (3/5) — see notes below
 
-Qwen3 clean run details (results/cerebras-qwen3-clean/, 2026-05-17):
-- pass@1: 0.0% | pass@5: 20.0% | Total cost: $1.14
-- hb002 (Bacillus licheniformis): SOLVED on attempts 3 and 4 ✓
-- hb020 (Homo sapiens PDB): 0/5 — model consistently guesses E. coli
-- recqgsfxqqodhjens (CTCF motif): 0/5 — resource aborts (MEME/R install confusion)
-- hb022 (pancreatic samples): 0/5 — mostly 429 Cerebras rate-limit errors; one run
-  got wrong format (Sample08 vs Sample_08) — known scorer strictness issue
-- hb053 (heat stress): 0/5 — mostly 429 Cerebras rate-limit errors
-NOTE: hb022 and hb053 results unreliable due to Cerebras queue-exceeded (429) errors
-hitting on first API call; run is not fully clean for those two problems.
+Qwen3 clean run #2 details (results/cerebras-qwen3-clean-2/, 2026-05-18):
+- pass@1: 0.0% | pass@5: 60.0% (3/5 problems) | Total cost: $5.93
+- hb020 (Homo sapiens PDB): SOLVED on attempts 2, 3, 5 ✓
+- hb002 (Bacillus licheniformis): SOLVED on attempt 5 ✓ (brittle — 1/5 only)
+- recqgsfxqqodhjens (CTCF motif): SOLVED on attempts 2 and 5 ✓
+- hb022 (pancreatic samples): 0/5 — format mismatch Sample01 vs Sample_01; human_solvable=False
+- hb053 (heat stress): 0/5 — model guessed pathogen/phosphate/drought; human_solvable=False;
+  attempt 4 hit error (429 retry budget fully exhausted — sustained congestion)
+Backoff fired repeatedly across all problems; all but hb053 attempt 4 recovered successfully.
+NOTE: scores.json pass_at_N keys are inconsistent (resource_abort re-runs via --resume caused
+extra attempts to be logged without updating totals). True pass@5 figures above are from
+monitor observations of first 5 attempts per problem.
 
 ## Active feature slice
-None — Cerebras benchmark slice complete.
+None — re-run Cerebras benchmark slice complete.
 
 ## Documentation
 - documents/code_walkthroughs/code_flow.md — end-to-end harness walkthrough (single Anthropic provider)
@@ -60,21 +63,41 @@ None — Cerebras benchmark slice complete.
 - Skip cache_control block when system prompt is empty (PR #33)
 
 ## Pending slices
-- Re-run clean Cerebras/Qwen3 benchmark (hb022/hb053 were 429-invalidated; backoff now in place)
+- Fix container PATH for Python/pip (ENV-1 to ENV-3): python3/pip not on default
+  $PATH; agents hit rc=127 and abort. Fix Dockerfile ENV or entrypoint + smoke test.
+- Fix bedtools in Docker image (ENV-4 to ENV-5): bedtools returns rc=127 despite
+  being listed as pre-installed; caused 4/7 recqgsfxqqodhjens aborts.
+- Add system prompt rule: rc=0 + empty output ≠ tool missing (SP-1 to SP-2):
+  model misreads empty blastn remote output as "not installed"; wastes ~15 steps/attempt.
+- Bug: extract_final_answer strips underscores from identifiers (SC-1 to SC-4):
+  _clean_answer() in harness/scorer.py line 28 nukes underscores in names like
+  Sample_01. Confirmed wrong-scored hb022 attempts 2 and 5. Fix paired-delimiter
+  regex and add regression tests.
+- Transient network error retry guidance in system prompt (NR-1 to NR-3): add
+  explicit wait-30s-and-retry rule to prompts/system.txt for wget/curl 429/503 errors
+- Rate-limit retry trajectory logging (RL-1 through RL-5): thread logger into
+  OpenAIProvider.chat() and emit rate_limit_retry records on each 429 backoff
 - Subagent for BLAST (Option 2 — reduces context bloat)
 - Curated bioinformatics tools (structured wrappers for BLAST, DESeq2, etc.)
+- Comparative re-run benchmark (RERUN-1 to RERUN-4): run preview eval on both
+  Claude Sonnet-4-6 and Cerebras/Qwen3 with critic enabled, after all ENV/SC/SP/NR
+  fixes are merged. First apples-to-apples comparison with fixed harness.
+- Fix scores.json scoring bug: --resume re-runs resource_abort attempts, causing
+  total_attempts counter and pass_at_N key to be inconsistent with actual attempt count
 
 ## Blockers / open questions for human
-- hb022 (pancreatic cancer sample labels) — model gets right samples but wrong format
-  (outputs "Sample01" not "Sample_01"). Scorer is strict. human_solvable=False.
-- Cerebras 429 queue-exceeded errors: free tier gets rate-limited under high traffic;
-  hb022 and hb053 mostly failed to start. Re-run during off-peak hours for clean results.
+- hb022 (pancreatic cancer sample labels) — model consistently uses Sample01 format
+  not Sample_01. Scorer is strict. human_solvable=False. Known unfixable without scorer change.
+- hb053 (heat stress) — model cannot identify heat stress from Brachypodium transcriptome;
+  guesses pathogen/phosphate/drought stress. human_solvable=False.
+- Cerebras 429 queue-exceeded errors: backoff handles transient congestion but hb053 attempt 4
+  exhausted all retries. Run during off-peak hours for best results.
 - Full 99-problem dataset requires HuggingFace approval
 - Groq Dev Tier upgrades temporarily unavailable (since ~Apr 2026, no ETA)
 - Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md
 
 ## Test status
-168/168 tests passing.
+173/173 tests passing.
 
 ## Notes for next agent session
 - Provider flags: --provider anthropic|openai|ollama|groq, --api-base-url, --api-key, --judge-model

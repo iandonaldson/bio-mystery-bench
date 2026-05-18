@@ -296,6 +296,19 @@ after each attempt in the CLI.
 Results saved to `results/cerebras-qwen3-clean/`. pass@1: 0%, pass@5: 20% (1/5 problems).
 Note: hb022 and hb053 were mostly invalidated by Cerebras 429 queue-exceeded errors.
 
+### ✅ Re-run Clean Cerebras/Qwen3 Benchmark (2026-05-18)
+Results saved to `results/cerebras-qwen3-clean-2/`. Backoff active throughout.
+- pass@1: 0.0% | pass@5 (true, first 5 attempts): 60% (3/5 problems) | Total cost: $5.93
+- hb020 (Homo sapiens PDB): SOLVED on attempts 2, 3, 5 ✓ — pass@5=1
+- hb002 (Bacillus licheniformis): SOLVED on attempt 5 ✓ (brittle) — pass@5=1
+- recqgsfxqqodhjens (CTCF motif): SOLVED on attempts 2 and 5 ✓ — pass@5=1
+- hb022 (pancreatic samples): 0/5 — format mismatch Sample01 vs Sample_01; human_solvable=False
+- hb053 (heat stress): 0/5 — model guessed pathogen/phosphate/drought stress; human_solvable=False;
+  attempt 4 hit error status (429 retry budget exhausted)
+NOTE: scores.json total_attempts/pass_at_N keys are inconsistent for problems where --resume
+re-ran resource_abort attempts (hb020, hb002, recqgsfxqqodhjens each have 6-7 logged attempts).
+The true pass@5 figures above are based on the first 5 attempts per problem from monitor observations.
+
 ### ✅ Exponential Backoff for 429 Rate-Limit Errors (2026-05-18)
 Added to `harness/llm.py` `OpenAIProvider.chat()`. Retries up to 4 times with 60s/120s/240s
 delays before re-raising. Prints `[rate-limit]` messages on each retry. Does not affect
@@ -311,6 +324,103 @@ Tests: `TestOpenAIProviderRateLimitBackoff` in `tests/test_agent_helpers.py` (5 
 > elephant carpaccio rule in `SKILLS/code_learnings.md` (L-05). Each sub-slice
 > needs its own unit test; do not rely solely on integration testing.
 
+### Fix container PATH so Python/pip are available on default shell (ENV-1 to ENV-3)
+`python3` and `pip` are installed inside the micromamba/conda environment but are
+not on the default `$PATH`. Every attempt that needs Python must either activate the
+environment first (`micromamba activate base`) or use full paths
+(`/opt/conda/bin/python3`). The system prompt claims pip and Python are pre-installed
+but does not tell the model how to reach them. Confirmed impact: recqgsfxqqodhjens
+aborted 4/7 attempts; hb022 attempt 3 also hit rc=127 for python3.
+
+Sub-slices:
+- ENV-1: Audit `docker/Dockerfile` (or entrypoint script) — confirm where Python/pip
+  live and why they are not on `$PATH` by default
+- ENV-2: Fix: either add `/opt/conda/bin` to `$PATH` in the Dockerfile `ENV` directive,
+  or add `micromamba activate base` to the container entrypoint so the conda env is
+  active when the agent's bash commands run
+- ENV-3: Add a smoke-test bash command to the test suite (or a manual verification step)
+  that starts a fresh container and confirms `python3 --version`, `pip --version`,
+  `bedtools --version` all succeed with rc=0 on the default PATH
+
+### Fix bedtools PATH / installation in Docker image (ENV-4 to ENV-5)
+`bedtools getfasta` returns rc=127 in recqgsfxqqodhjens trajectories despite being
+listed as pre-installed in the system prompt. Either bedtools is absent from the image
+or is installed outside `$PATH`. This caused the agent to abort 4/7 attempts on the
+CTCF motif problem instead of extracting peak sequences.
+
+Sub-slices:
+- ENV-4: Audit `docker/Dockerfile` — confirm whether bedtools is installed and at what
+  path; if missing, add `micromamba install -c bioconda bedtools` to the Dockerfile
+- ENV-5: Include bedtools in the ENV-3 smoke test
+
+### Add system prompt rule: rc=0 with empty output ≠ tool missing (SP-1 to SP-2)
+When `blastn -db nt -remote` returned rc=0 with empty stdout (network timeout / no
+hits), the model incorrectly concluded "blastn not available" and spent ~15 steps per
+attempt reinstalling it. The system prompt has no guidance on interpreting this case.
+
+Sub-slices:
+- SP-1: Add a rule to `prompts/system.txt` under "General approach", e.g.:
+  > A command that exits with rc=0 and empty output ran successfully but produced no
+  > results — do not assume the tool is missing. Check stderr and try a simpler test
+  > command (e.g. `blastn -version`) to confirm availability before reinstalling.
+- SP-2: Add a companion rule for remote BLAST specifically:
+  > Remote BLAST (`-db nt -remote`) can return empty output due to network timeouts.
+  > If output is empty, verify with `blastn -version` first, then retry the query or
+  > switch to a local approach before concluding the tool is absent.
+
+### Bug: extract_final_answer strips underscores from identifiers
+`_clean_answer()` in `harness/scorer.py` (line 28) applies
+`re.sub(r"\*{1,2}|_{1,2}", "", text)` to strip markdown bold/italic markers.
+This correctly removes `**` and `__` delimiters but also destroys underscores
+that are part of identifier names (e.g. `Sample_01` → `Sample01`).
+
+Confirmed impact on hb022: attempts 2 and 5 produced correct answers
+`[Sample_01, ..., Sample_08]` but were scored wrong because the extractor
+silently corrupted the predicted value before comparison.
+
+Fix: replace the blanket underscore strip with a regex that only removes
+paired markdown delimiters (`\*\*...\*\*`, `__...__`, `\*...\*`, `_..._`),
+not bare underscores inside words. Also add a regression test that verifies
+`Sample_01` survives `extract_final_answer` unchanged.
+
+Sub-slices:
+- SC-1: Fix `_clean_answer()` regex to target only paired markdown delimiters
+- SC-2: Regression test: `extract_final_answer("FINAL ANSWER: Sample_01")` == `"Sample_01"`
+- SC-3: Regression test: bold markers `**answer**` still stripped correctly
+- SC-4: Re-score hb022 with fixed extractor; update results note in features.md
+
+### Transient Network Error Retry Guidance in System Prompt
+The system prompt (`prompts/system.txt`) has no instructions for handling transient
+network errors from `wget`, `curl`, or web APIs (429, 503, connection reset). The model
+currently improvises retry behaviour inconsistently across attempts.
+
+Fix: add an explicit retry rule to `prompts/system.txt` under the "General approach"
+section, e.g.:
+
+> If a `wget`, `curl`, or API call returns a transient error (429, 503, connection
+> reset, or empty response), wait 30 seconds and retry up to 3 times before switching
+> to an alternative approach or mirror.
+
+Sub-slices:
+- NR-1: Add the retry rule to `prompts/system.txt`
+- NR-2: Add a note to `documents/code_walkthroughs/code_flow.md` describing the rule
+- NR-3: Verify the rule appears in a trajectory's user message (system prompt is
+  cache-controlled; confirm it is present in at least one logged run)
+
+### Rate-Limit Retry Trajectory Logging
+Log each Cerebras (or any OpenAI-compatible) 429 backoff event to the trajectory file so
+retry behaviour is observable without relying on benchmark stdout. Decompose into:
+- RL-1: Thread a `logger` parameter into `OpenAIProvider.chat()` (optional, defaults `None`)
+  so the provider can emit log records without a hard dependency on the logger
+- RL-2: Inside the backoff loop in `OpenAIProvider.chat()`, call
+  `logger.log("rate_limit_retry", {"attempt": i, "wait_seconds": delay, "provider": "openai"})`
+  when logger is not None
+- RL-3: Wire the logger through from `AgentRun._loop()` → `self.client.chat()` call site
+- RL-4: Add `rate_limit_retry` to the trajectory schema table in `features.md` and
+  `documents/code_walkthroughs/2.llm_backend_expansion.md`
+- RL-5: Unit tests — assert logger is called on 429, not called on success, not called
+  when logger=None; verify record fields (attempt, wait_seconds, provider)
+
 ### BLAST Subagent
 Offload BLAST queries to a separate subprocess/subagent to prevent long BLAST
 stdout from consuming the agent's context window. Decompose into:
@@ -322,3 +432,50 @@ stdout from consuming the agent's context window. Decompose into:
 Structured wrappers for tools that commonly produce large or hard-to-parse output
 (DESeq2, STAR, featureCounts). Each wrapper: runs the tool, extracts key metrics,
 writes structured JSON to scratch. Decompose per-tool, one sub-slice each.
+
+### Comparative Re-run Benchmark (RERUN-1 to RERUN-4)
+Run a clean 5-problem preview benchmark on both Claude (Anthropic) and
+Qwen3-235B (Cerebras) after all harness fixes in this session are merged
+(ENV-1 to ENV-5, SC-1 to SC-4, SP-1 to SP-2, NR-1 to NR-3), with the
+critic enabled for both. This is the first apples-to-apples comparison
+with a fully fixed harness.
+
+**Prerequisite:** all of the following must be merged before starting:
+- ENV-1/ENV-2: Python/pip on default PATH in container
+- ENV-4: bedtools confirmed present in container
+- SC-1/SC-2: underscore-stripping bug fixed in `extract_final_answer`
+- SP-1/SP-2: rc=0 + empty output guidance in system prompt
+- NR-1: transient network retry rule in system prompt
+
+**Run commands:**
+
+Claude Sonnet (with critic):
+```bash
+python3 scripts/run_eval.py \
+  --provider anthropic \
+  --model claude-sonnet-4-6 \
+  --critic-injection-points after_final_answer \
+  --critic-model claude-haiku-4-5-20251001 \
+  --results-dir results/claude-sonnet-rerun \
+  --dataset preview --n-attempts 5
+```
+
+Cerebras Qwen3 (with critic, Haiku as judge):
+```bash
+python3 scripts/run_eval.py \
+  --provider openai \
+  --api-base-url https://api.cerebras.ai/v1 \
+  --api-key $CEREBRAS_API_KEY \
+  --model qwen-3-235b-a22b-instruct-2507 \
+  --judge-model claude-haiku-4-5-20251001 \
+  --critic-injection-points after_final_answer \
+  --critic-model claude-haiku-4-5-20251001 \
+  --results-dir results/cerebras-qwen3-rerun \
+  --dataset preview --n-attempts 5
+```
+
+Sub-slices:
+- RERUN-1: Confirm all prerequisite slices are merged; run smoke test (ENV-3)
+- RERUN-2: Run Claude Sonnet benchmark; record pass@1, pass@5, cost, per-problem notes
+- RERUN-3: Run Cerebras/Qwen3 benchmark; record same metrics
+- RERUN-4: Update `claude-progress.txt` and `features.md` with comparative results table
