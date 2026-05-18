@@ -324,6 +324,27 @@ Tests: `TestOpenAIProviderRateLimitBackoff` in `tests/test_agent_helpers.py` (5 
 > elephant carpaccio rule in `SKILLS/code_learnings.md` (L-05). Each sub-slice
 > needs its own unit test; do not rely solely on integration testing.
 
+### Bug: extract_final_answer strips underscores from identifiers
+`_clean_answer()` in `harness/scorer.py` (line 28) applies
+`re.sub(r"\*{1,2}|_{1,2}", "", text)` to strip markdown bold/italic markers.
+This correctly removes `**` and `__` delimiters but also destroys underscores
+that are part of identifier names (e.g. `Sample_01` → `Sample01`).
+
+Confirmed impact on hb022: attempts 2 and 5 produced correct answers
+`[Sample_01, ..., Sample_08]` but were scored wrong because the extractor
+silently corrupted the predicted value before comparison.
+
+Fix: replace the blanket underscore strip with a regex that only removes
+paired markdown delimiters (`\*\*...\*\*`, `__...__`, `\*...\*`, `_..._`),
+not bare underscores inside words. Also add a regression test that verifies
+`Sample_01` survives `extract_final_answer` unchanged.
+
+Sub-slices:
+- SC-1: Fix `_clean_answer()` regex to target only paired markdown delimiters
+- SC-2: Regression test: `extract_final_answer("FINAL ANSWER: Sample_01")` == `"Sample_01"`
+- SC-3: Regression test: bold markers `**answer**` still stripped correctly
+- SC-4: Re-score hb022 with fixed extractor; update results note in features.md
+
 ### Rate-Limit Retry Trajectory Logging
 Log each Cerebras (or any OpenAI-compatible) 429 backoff event to the trajectory file so
 retry behaviour is observable without relying on benchmark stdout. Decompose into:
