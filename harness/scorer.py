@@ -23,9 +23,16 @@ def extract_final_answer(text: str) -> str:
 
 
 def _clean_answer(text: str) -> str:
-    """Strip markdown formatting artifacts from an extracted answer."""
-    # Remove bold (**text** or __text__) and italic (*text* or _text_) markers
-    text = re.sub(r"\*{1,2}|_{1,2}", "", text)
+    """Strip markdown bold/italic markers, preserving underscores in identifiers."""
+    # Paired double-asterisk bold: **text**
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
+    # Paired single-asterisk italic: *text*
+    text = re.sub(r"\*(.+?)\*", r"\1", text, flags=re.DOTALL)
+    # Orphaned leading/trailing asterisks (e.g. trailing ** from bold wrapping)
+    text = re.sub(r"^\*+|\*+$", "", text)
+    # Paired double-underscore bold at non-word positions: __text__
+    # Lookbehind/ahead prevents matching underscores inside identifiers like Sample_01
+    text = re.sub(r"(?<!\w)__(.+?)__(?!\w)", r"\1", text, flags=re.DOTALL)
     return text.strip()
 
 

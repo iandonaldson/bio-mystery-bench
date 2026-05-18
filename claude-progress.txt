@@ -1,12 +1,13 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-18 — Re-run clean Cerebras/Qwen3 benchmark completed (results/cerebras-qwen3-clean-2/)
+2026-05-18 — SC-1 to SC-4: fixed _clean_answer() underscore bug; 178/178 tests passing
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
-providers. 173/173 tests passing. Second clean Cerebras/Qwen3-235B benchmark run completed
-with exponential backoff active throughout.
+providers. 178/178 tests passing. Scorer bug fixed: _clean_answer() no longer strips
+bare underscores from identifiers like Sample_01. hb022 scoring is now correct for
+attempts that produced the right answer format.
 
 Preview benchmark results (all runs on 5-problem preview split):
 - Claude Sonnet 4.6 (Anthropic): 80% pass@1 (from earlier run)
@@ -27,7 +28,7 @@ extra attempts to be logged without updating totals). True pass@5 figures above 
 monitor observations of first 5 attempts per problem.
 
 ## Active feature slice
-None — re-run Cerebras benchmark slice complete.
+None — SC-1 to SC-4 complete.
 
 ## Documentation
 - documents/code_walkthroughs/code_flow.md — end-to-end harness walkthrough (single Anthropic provider)
@@ -61,6 +62,7 @@ None — re-run Cerebras benchmark slice complete.
 - Fix critic client — _run_critic uses self.critic_client (PR #31)
 - Preflight model ping before eval starts (PR #32)
 - Skip cache_control block when system prompt is empty (PR #33)
+- Fix _clean_answer() underscore bug — SC-1 to SC-4 (this PR)
 
 ## Pending slices
 - Fix container PATH for Python/pip (ENV-1 to ENV-3): python3/pip not on default
@@ -69,10 +71,6 @@ None — re-run Cerebras benchmark slice complete.
   being listed as pre-installed; caused 4/7 recqgsfxqqodhjens aborts.
 - Add system prompt rule: rc=0 + empty output ≠ tool missing (SP-1 to SP-2):
   model misreads empty blastn remote output as "not installed"; wastes ~15 steps/attempt.
-- Bug: extract_final_answer strips underscores from identifiers (SC-1 to SC-4):
-  _clean_answer() in harness/scorer.py line 28 nukes underscores in names like
-  Sample_01. Confirmed wrong-scored hb022 attempts 2 and 5. Fix paired-delimiter
-  regex and add regression tests.
 - Transient network error retry guidance in system prompt (NR-1 to NR-3): add
   explicit wait-30s-and-retry rule to prompts/system.txt for wget/curl 429/503 errors
 - Rate-limit retry trajectory logging (RL-1 through RL-5): thread logger into
@@ -97,7 +95,7 @@ None — re-run Cerebras benchmark slice complete.
 - Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md
 
 ## Test status
-173/173 tests passing.
+178/178 tests passing.
 
 ## Notes for next agent session
 - Provider flags: --provider anthropic|openai|ollama|groq, --api-base-url, --api-key, --judge-model
