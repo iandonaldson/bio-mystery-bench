@@ -432,3 +432,50 @@ stdout from consuming the agent's context window. Decompose into:
 Structured wrappers for tools that commonly produce large or hard-to-parse output
 (DESeq2, STAR, featureCounts). Each wrapper: runs the tool, extracts key metrics,
 writes structured JSON to scratch. Decompose per-tool, one sub-slice each.
+
+### Comparative Re-run Benchmark (RERUN-1 to RERUN-4)
+Run a clean 5-problem preview benchmark on both Claude (Anthropic) and
+Qwen3-235B (Cerebras) after all harness fixes in this session are merged
+(ENV-1 to ENV-5, SC-1 to SC-4, SP-1 to SP-2, NR-1 to NR-3), with the
+critic enabled for both. This is the first apples-to-apples comparison
+with a fully fixed harness.
+
+**Prerequisite:** all of the following must be merged before starting:
+- ENV-1/ENV-2: Python/pip on default PATH in container
+- ENV-4: bedtools confirmed present in container
+- SC-1/SC-2: underscore-stripping bug fixed in `extract_final_answer`
+- SP-1/SP-2: rc=0 + empty output guidance in system prompt
+- NR-1: transient network retry rule in system prompt
+
+**Run commands:**
+
+Claude Sonnet (with critic):
+```bash
+python3 scripts/run_eval.py \
+  --provider anthropic \
+  --model claude-sonnet-4-6 \
+  --critic-injection-points after_final_answer \
+  --critic-model claude-haiku-4-5-20251001 \
+  --results-dir results/claude-sonnet-rerun \
+  --dataset preview --n-attempts 5
+```
+
+Cerebras Qwen3 (with critic, Haiku as judge):
+```bash
+python3 scripts/run_eval.py \
+  --provider openai \
+  --api-base-url https://api.cerebras.ai/v1 \
+  --api-key $CEREBRAS_API_KEY \
+  --model qwen-3-235b-a22b-instruct-2507 \
+  --judge-model claude-haiku-4-5-20251001 \
+  --critic-injection-points after_final_answer \
+  --critic-model claude-haiku-4-5-20251001 \
+  --results-dir results/cerebras-qwen3-rerun \
+  --dataset preview --n-attempts 5
+```
+
+Sub-slices:
+- RERUN-1: Confirm all prerequisite slices are merged; run smoke test (ENV-3)
+- RERUN-2: Run Claude Sonnet benchmark; record pass@1, pass@5, cost, per-problem notes
+- RERUN-3: Run Cerebras/Qwen3 benchmark; record same metrics
+- RERUN-4: Update `claude-progress.txt` and `features.md` with comparative results table
