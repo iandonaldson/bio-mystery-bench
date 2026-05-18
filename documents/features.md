@@ -324,6 +324,20 @@ Tests: `TestOpenAIProviderRateLimitBackoff` in `tests/test_agent_helpers.py` (5 
 > elephant carpaccio rule in `SKILLS/code_learnings.md` (L-05). Each sub-slice
 > needs its own unit test; do not rely solely on integration testing.
 
+### Rate-Limit Retry Trajectory Logging
+Log each Cerebras (or any OpenAI-compatible) 429 backoff event to the trajectory file so
+retry behaviour is observable without relying on benchmark stdout. Decompose into:
+- RL-1: Thread a `logger` parameter into `OpenAIProvider.chat()` (optional, defaults `None`)
+  so the provider can emit log records without a hard dependency on the logger
+- RL-2: Inside the backoff loop in `OpenAIProvider.chat()`, call
+  `logger.log("rate_limit_retry", {"attempt": i, "wait_seconds": delay, "provider": "openai"})`
+  when logger is not None
+- RL-3: Wire the logger through from `AgentRun._loop()` → `self.client.chat()` call site
+- RL-4: Add `rate_limit_retry` to the trajectory schema table in `features.md` and
+  `documents/code_walkthroughs/2.llm_backend_expansion.md`
+- RL-5: Unit tests — assert logger is called on 429, not called on success, not called
+  when logger=None; verify record fields (attempt, wait_seconds, provider)
+
 ### BLAST Subagent
 Offload BLAST queries to a separate subprocess/subagent to prevent long BLAST
 stdout from consuming the agent's context window. Decompose into:

@@ -63,6 +63,8 @@ None — re-run Cerebras benchmark slice complete.
 - Skip cache_control block when system prompt is empty (PR #33)
 
 ## Pending slices
+- Rate-limit retry trajectory logging (RL-1 through RL-5): thread logger into
+  OpenAIProvider.chat() and emit rate_limit_retry records on each 429 backoff
 - Subagent for BLAST (Option 2 — reduces context bloat)
 - Curated bioinformatics tools (structured wrappers for BLAST, DESeq2, etc.)
 - Fix scores.json scoring bug: --resume re-runs resource_abort attempts, causing
