@@ -54,6 +54,9 @@ RUN /opt/conda/bin/pip install --no-cache-dir \
 # Keep micromamba activate working for the agent
 SHELL ["/bin/bash", "--login", "-c"]
 
+# Expose conda tools on the default PATH for non-login bash shells (e.g. docker exec)
+ENV PATH=/opt/conda/bin:$PATH
+
 RUN mkdir -p /workspace/data /workspace/scratch /workspace/output
 WORKDIR /workspace
 
