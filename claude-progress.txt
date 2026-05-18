@@ -60,9 +60,9 @@ None — Cerebras benchmark slice complete.
 - Skip cache_control block when system prompt is empty (PR #33)
 
 ## Pending slices
+- Re-run clean Cerebras/Qwen3 benchmark (hb022/hb053 were 429-invalidated; backoff now in place)
 - Subagent for BLAST (Option 2 — reduces context bloat)
 - Curated bioinformatics tools (structured wrappers for BLAST, DESeq2, etc.)
-- Re-run Cerebras hb022/hb053 when Cerebras traffic is lower (429 errors invalidated those results)
 
 ## Blockers / open questions for human
 - hb022 (pancreatic cancer sample labels) — model gets right samples but wrong format

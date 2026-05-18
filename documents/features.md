@@ -296,6 +296,13 @@ after each attempt in the CLI.
 Results saved to `results/cerebras-qwen3-clean/`. pass@1: 0%, pass@5: 20% (1/5 problems).
 Note: hb022 and hb053 were mostly invalidated by Cerebras 429 queue-exceeded errors.
 
+### ✅ Exponential Backoff for 429 Rate-Limit Errors (2026-05-18)
+Added to `harness/llm.py` `OpenAIProvider.chat()`. Retries up to 4 times with 60s/120s/240s
+delays before re-raising. Prints `[rate-limit]` messages on each retry. Does not affect
+`BadRequestError` (Llama tool-call recovery) or the Anthropic provider.
+Header-reading utility: `scripts/check_cerebras_limits.py`.
+Tests: `TestOpenAIProviderRateLimitBackoff` in `tests/test_agent_helpers.py` (5 tests).
+
 ---
 
 ## Pending Slices
