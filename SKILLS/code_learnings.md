@@ -207,3 +207,83 @@ python3 -m pytest tests/   # from inside the worktree (default shell cwd)
 The worktree's default shell working directory is already the worktree root, so plain
 `python3 -m pytest tests/` is correct. Only add an explicit `cd` if you need the main
 repo.
+
+---
+
+## L-10: --resume re-runs resource_abort attempts, corrupting scores.json totals
+
+**Lesson (2026-05-18):** `is_attempt_complete()` in `harness/logger.py` does not treat
+`resource_abort` as a terminal status. When `--resume` is used, any attempt that ended
+in `resource_abort` is re-run and appended to the `attempts` array in `scores.json`.
+This leaves `total_attempts` and `pass_at_N` keys inconsistent with the actual attempt
+count — e.g. hb020 showed `total_attempts: 4` and `pass_at_4: true` but had 6 entries
+in its `attempts` array.
+
+**Rule:** When reading `scores.json` after a resumed run, do not trust `total_attempts`
+or `pass_at_N` keys if any attempt had `resource_abort` status. Count the `attempts`
+array length manually, or read pass/fail results from the monitor output captured during
+the run. The pending fix is slice SC-4 / the `--resume` scoring bug.
+
+**Detection:** If `len(attempts) != total_attempts` in any problem's scores.json entry,
+the totals are stale from a pre-resume snapshot.
+
+---
+
+## L-11: _clean_answer() strips bare underscores, silently corrupting predicted values
+
+**Lesson (2026-05-18):** `harness/scorer.py` `_clean_answer()` applies:
+```python
+text = re.sub(r"\*{1,2}|_{1,2}", "", text)
+```
+This is intended to strip markdown bold/italic markers (`**`, `__`, `*`, `_`) but
+also destroys any bare underscore that is part of an identifier (e.g. `Sample_01`
+becomes `Sample01`). The corruption is silent — `scores.json` shows the corrupted
+value as `predicted`, so it looks like the model gave the wrong format when it
+actually gave the right answer.
+
+**Confirmed impact:** hb022 attempts 2 and 5 both output `[Sample_01, ..., Sample_08]`
+(correct) but were scored wrong because the extractor mangled them to `[Sample01, ...]`.
+
+**Rule:** When an attempt is marked wrong but the trajectory's FINAL ANSWER looks
+visually correct, check whether `_clean_answer()` is corrupting the extracted value
+before concluding the model was wrong. The fix (SC-1) replaces the blanket underscore
+strip with paired-delimiter matching.
+
+---
+
+## L-12: rc=0 with empty stdout from a tool means no results, not tool absent
+
+**Lesson (2026-05-18):** When `blastn -db nt -remote` returned rc=0 with empty stdout
+(network timeout / no BLAST hits), the Qwen3 agent concluded "blastn not available"
+and spent ~15 steps per attempt attempting to reinstall it. rc=0 means the binary ran
+successfully — empty output means the query returned nothing.
+
+**Rule:** Do not confuse empty output with tool absence. The canonical tool-availability
+check is `which <tool>` or `<tool> --version`, not inference from an empty result.
+The system prompt now includes (pending slice SP-1) an explicit rule:
+> *A command that exits rc=0 with empty output ran successfully but produced no results.*
+> *Use `<tool> --version` to confirm availability before reinstalling.*
+
+**Corollary:** When adding a new tool to the Docker image, add a `which <tool>` smoke
+test (ENV-3) so future agents can quickly verify availability without ambiguity.
+
+---
+
+## L-13: conda/micromamba tools are not on the default container PATH
+
+**Lesson (2026-05-18):** Tools installed inside the micromamba environment
+(`python3`, `pip`, `bedtools`) are not on `$PATH` when the agent's bash commands
+run. `which python3` returns rc=1; `pip` returns rc=127. The system prompt lists
+these as pre-installed, creating a false expectation.
+
+**Confirmed impact:** recqgsfxqqodhjens aborted 4/7 attempts citing missing Python
+and bedtools. hb022 attempt 3 also hit rc=127 for python3.
+
+**Root cause:** The Dockerfile does not add `/opt/conda/bin` to `$PATH` and the
+entrypoint does not activate the base environment before the agent's commands run.
+
+**Rule:** Do not claim a tool is pre-installed in the system prompt unless `which <tool>`
+confirms rc=0 in a fresh container shell. The fix (ENV-1/ENV-2) adds the conda bin
+directory to `$PATH` in the Dockerfile. Until that fix is merged, agents working in
+the container should prefix commands with the full path `/opt/conda/bin/python3` or
+run `export PATH=/opt/conda/bin:$PATH` as a first step.
