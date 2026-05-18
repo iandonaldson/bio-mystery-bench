@@ -79,7 +79,7 @@ class TestIsAttemptComplete:
             logger.log("assistant", {"reasoning": "thinking..."})
         assert is_attempt_complete(tmp_results, "p1", 0) is False
 
-    @pytest.mark.parametrize("terminal_status", ["success", "max_steps", "timeout", "token_limit"])
+    @pytest.mark.parametrize("terminal_status", ["success", "max_steps", "timeout", "token_limit", "resource_abort"])
     def test_returns_true_for_terminal_statuses(self, tmp_results, terminal_status):
         with TrajectoryLogger(tmp_results, problem_id="p1", attempt=0) as logger:
             logger.log("user", {"question": "q"})

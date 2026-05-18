@@ -207,12 +207,12 @@ Each record has four fields:
 
 ### `is_attempt_complete(results_dir, problem_id, attempt)`
 Returns `True` if the trajectory file exists and contains a `status` record with
-one of the terminal values: `success`, `max_steps`, `timeout`, `token_limit`.
+one of the terminal values: `success`, `max_steps`, `timeout`, `token_limit`, `resource_abort`.
 Used by `--resume` to skip already-finished attempts.
 
 **Tests:** `tests/test_logger.py`
 - `TestTrajectoryLogger` — file creation, valid JSON per line, sequential step numbers, separate files per attempt, payload correctness, non-negative elapsed time
-- `TestIsAttemptComplete` — missing file, empty file, no terminal status, all four terminal statuses, non-terminal status ignored
+- `TestIsAttemptComplete` — missing file, empty file, no terminal status, all five terminal statuses (including `resource_abort`), non-terminal status ignored
 
 ---
 
@@ -393,19 +393,30 @@ Sub-slices:
 - NR-3: Manual check — confirm rule appears in a trajectory's first logged user
   message after the next benchmark run (system prompt is cache-controlled).
 
-### Rate-Limit Retry Trajectory Logging
+### ✅ Rate-Limit Retry Trajectory Logging (RL-1 to RL-5, PR #43)
 Log each Cerebras (or any OpenAI-compatible) 429 backoff event to the trajectory file so
 retry behaviour is observable without relying on benchmark stdout. Decompose into:
-- RL-1: Thread a `logger` parameter into `OpenAIProvider.chat()` (optional, defaults `None`)
+- RL-1 ✅: Thread a `logger` parameter into `OpenAIProvider.chat()` (optional, defaults `None`)
   so the provider can emit log records without a hard dependency on the logger
-- RL-2: Inside the backoff loop in `OpenAIProvider.chat()`, call
+- RL-2 ✅: Inside the backoff loop in `OpenAIProvider.chat()`, call
   `logger.log("rate_limit_retry", {"attempt": i, "wait_seconds": delay, "provider": "openai"})`
   when logger is not None
-- RL-3: Wire the logger through from `AgentRun._loop()` → `self.client.chat()` call site
-- RL-4: Add `rate_limit_retry` to the trajectory schema table in `features.md` and
+- RL-3 ✅: Wire the logger through from `AgentRun._loop()` → `self.client.chat()` call site
+- RL-4 ✅: Add `rate_limit_retry` to the trajectory schema table in `features.md` and
   `documents/code_walkthroughs/2.llm_backend_expansion.md`
-- RL-5: Unit tests — assert logger is called on 429, not called on success, not called
+- RL-5 ✅: Unit tests — assert logger is called on 429, not called on success, not called
   when logger=None; verify record fields (attempt, wait_seconds, provider)
+
+### ✅ Fix --resume re-runs resource_abort attempts (RBfix-1 to RBfix-2)
+`is_attempt_complete()` in `harness/logger.py` did not include `resource_abort` in the set
+of terminal statuses. When `--resume` was used, attempts that ended with a resource_abort
+were re-run and appended to `scores.json`, making `total_attempts` and `pass_at_N` keys
+inconsistent with the actual attempt count.
+
+Sub-slices:
+- RBfix-1 ✅: Add `"resource_abort"` to the terminal status set in `is_attempt_complete()`
+- RBfix-2 ✅: Regression test — parametrize `test_returns_true_for_terminal_statuses`
+  to include `"resource_abort"`
 
 ### BLAST Subagent
 Offload BLAST queries to a separate subprocess/subagent to prevent long BLAST

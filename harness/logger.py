@@ -57,7 +57,7 @@ def is_attempt_complete(results_dir: str | Path, problem_id: str, attempt: int) 
             try:
                 rec = json.loads(line)
                 if rec.get("role") == "status" and rec.get("data", {}).get("status") in (
-                    "success", "max_steps", "timeout", "token_limit"
+                    "success", "max_steps", "timeout", "token_limit", "resource_abort"
                 ):
                     return True
             except json.JSONDecodeError:
