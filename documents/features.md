@@ -296,6 +296,19 @@ after each attempt in the CLI.
 Results saved to `results/cerebras-qwen3-clean/`. pass@1: 0%, pass@5: 20% (1/5 problems).
 Note: hb022 and hb053 were mostly invalidated by Cerebras 429 queue-exceeded errors.
 
+### ✅ Re-run Clean Cerebras/Qwen3 Benchmark (2026-05-18)
+Results saved to `results/cerebras-qwen3-clean-2/`. Backoff active throughout.
+- pass@1: 0.0% | pass@5 (true, first 5 attempts): 60% (3/5 problems) | Total cost: $5.93
+- hb020 (Homo sapiens PDB): SOLVED on attempts 2, 3, 5 ✓ — pass@5=1
+- hb002 (Bacillus licheniformis): SOLVED on attempt 5 ✓ (brittle) — pass@5=1
+- recqgsfxqqodhjens (CTCF motif): SOLVED on attempts 2 and 5 ✓ — pass@5=1
+- hb022 (pancreatic samples): 0/5 — format mismatch Sample01 vs Sample_01; human_solvable=False
+- hb053 (heat stress): 0/5 — model guessed pathogen/phosphate/drought stress; human_solvable=False;
+  attempt 4 hit error status (429 retry budget exhausted)
+NOTE: scores.json total_attempts/pass_at_N keys are inconsistent for problems where --resume
+re-ran resource_abort attempts (hb020, hb002, recqgsfxqqodhjens each have 6-7 logged attempts).
+The true pass@5 figures above are based on the first 5 attempts per problem from monitor observations.
+
 ### ✅ Exponential Backoff for 429 Rate-Limit Errors (2026-05-18)
 Added to `harness/llm.py` `OpenAIProvider.chat()`. Retries up to 4 times with 60s/120s/240s
 delays before re-raising. Prints `[rate-limit]` messages on each retry. Does not affect
