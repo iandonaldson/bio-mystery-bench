@@ -312,6 +312,13 @@ NOTE: scores.json total_attempts/pass_at_N keys are inconsistent for problems wh
 re-ran resource_abort attempts (hb020, hb002, recqgsfxqqodhjens each have 6-7 logged attempts).
 The true pass@5 figures above are based on the first 5 attempts per problem from monitor observations.
 
+### ✅ Fix Container PATH for Python/pip/bedtools (2026-05-18)
+Added `ENV PATH=/opt/conda/bin:$PATH` to `docker/Dockerfile`. All conda-installed tools
+are now on the default `$PATH` for every `docker exec` call. Root cause: `docker exec`
+uses non-login bash; no conda profile is sourced; path must be baked into the image.
+Verified via `scripts/smoke_test_container.py`: python3 3.11.9, pip 26.1.1, bedtools v2.31.1,
+samtools 1.19.2 all return rc=0 on a fresh container.
+
 ### ✅ Exponential Backoff for 429 Rate-Limit Errors (2026-05-18)
 Added to `harness/llm.py` `OpenAIProvider.chat()`. Retries up to 4 times with 60s/120s/240s
 delays before re-raising. Prints `[rate-limit]` messages on each retry. Does not affect
@@ -327,34 +334,22 @@ Tests: `TestOpenAIProviderRateLimitBackoff` in `tests/test_agent_helpers.py` (5 
 > elephant carpaccio rule in `SKILLS/code_learnings.md` (L-05). Each sub-slice
 > needs its own unit test; do not rely solely on integration testing.
 
-### Fix container PATH so Python/pip are available on default shell (ENV-1 to ENV-3)
-`python3` and `pip` are installed inside the micromamba/conda environment but are
-not on the default `$PATH`. Every attempt that needs Python must either activate the
-environment first (`micromamba activate base`) or use full paths
-(`/opt/conda/bin/python3`). The system prompt claims pip and Python are pre-installed
-but does not tell the model how to reach them. Confirmed impact: recqgsfxqqodhjens
-aborted 4/7 attempts; hb022 attempt 3 also hit rc=127 for python3.
+### ✅ Fix container PATH so Python/pip/bedtools are available on default shell (ENV-1 to ENV-5)
+All conda-installed tools (`python3`, `pip`, `bedtools`, `samtools`, etc.) are now on
+the default `$PATH` via `ENV PATH=/opt/conda/bin:$PATH` in `docker/Dockerfile`. The
+root cause was that `docker exec` runs bash in non-login mode so no conda profile
+scripts are sourced; the fix ensures `$PATH` is set at image build time.
+
+Smoke test script: `scripts/smoke_test_container.py` — starts a fresh container and
+verifies `python3 --version`, `pip --version`, `bedtools --version`, `samtools --version`
+all return rc=0.
 
 Sub-slices:
-- ENV-1: Audit `docker/Dockerfile` (or entrypoint script) — confirm where Python/pip
-  live and why they are not on `$PATH` by default
-- ENV-2: Fix: either add `/opt/conda/bin` to `$PATH` in the Dockerfile `ENV` directive,
-  or add `micromamba activate base` to the container entrypoint so the conda env is
-  active when the agent's bash commands run
-- ENV-3: Add a smoke-test bash command to the test suite (or a manual verification step)
-  that starts a fresh container and confirms `python3 --version`, `pip --version`,
-  `bedtools --version` all succeed with rc=0 on the default PATH
-
-### Fix bedtools PATH / installation in Docker image (ENV-4 to ENV-5)
-`bedtools getfasta` returns rc=127 in recqgsfxqqodhjens trajectories despite being
-listed as pre-installed in the system prompt. Either bedtools is absent from the image
-or is installed outside `$PATH`. This caused the agent to abort 4/7 attempts on the
-CTCF motif problem instead of extracting peak sequences.
-
-Sub-slices:
-- ENV-4: Audit `docker/Dockerfile` — confirm whether bedtools is installed and at what
-  path; if missing, add `micromamba install -c bioconda bedtools` to the Dockerfile
-- ENV-5: Include bedtools in the ENV-3 smoke test
+- ENV-1 ✅: Audited — python3/pip at `/opt/conda/bin/`, no PATH directive in Dockerfile
+- ENV-2 ✅: Added `ENV PATH=/opt/conda/bin:$PATH` to `docker/Dockerfile` (line 57)
+- ENV-3 ✅: `scripts/smoke_test_container.py` verifies python3, pip, bedtools, samtools
+- ENV-4 ✅: Audited — bedtools=2.31 present in Dockerfile; issue was PATH only
+- ENV-5 ✅: bedtools included in smoke test
 
 ### Add system prompt rule: rc=0 with empty output ≠ tool missing (SP-1 to SP-2)
 When `blastn -db nt -remote` returned rc=0 with empty stdout (network timeout / no

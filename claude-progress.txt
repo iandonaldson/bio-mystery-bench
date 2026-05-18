@@ -1,13 +1,15 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-18 — SC-1 to SC-4: fixed _clean_answer() underscore bug; 178/178 tests passing
+2026-05-18 — ENV-1 to ENV-5: fixed container PATH so python3/pip/bedtools accessible on
+default shell; smoke test script added; 178/178 tests passing
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
-providers. 178/178 tests passing. Scorer bug fixed: _clean_answer() no longer strips
-bare underscores from identifiers like Sample_01. hb022 scoring is now correct for
-attempts that produced the right answer format.
+providers. 178/178 tests passing. Container PATH now includes /opt/conda/bin — python3,
+pip, bedtools, samtools and all conda-installed tools are available without full paths or
+manual conda activation. Smoke test (scripts/smoke_test_container.py) verifies all key
+tools return rc=0 in a fresh container.
 
 Preview benchmark results (all runs on 5-problem preview split):
 - Claude Sonnet 4.6 (Anthropic): 80% pass@1 (from earlier run)
@@ -28,7 +30,7 @@ extra attempts to be logged without updating totals). True pass@5 figures above 
 monitor observations of first 5 attempts per problem.
 
 ## Active feature slice
-None — SC-1 to SC-4 complete.
+None — ENV-1 to ENV-5 complete.
 
 ## Documentation
 - documents/code_walkthroughs/code_flow.md — end-to-end harness walkthrough (single Anthropic provider)
@@ -62,13 +64,10 @@ None — SC-1 to SC-4 complete.
 - Fix critic client — _run_critic uses self.critic_client (PR #31)
 - Preflight model ping before eval starts (PR #32)
 - Skip cache_control block when system prompt is empty (PR #33)
-- Fix _clean_answer() underscore bug — SC-1 to SC-4 (this PR)
+- Fix _clean_answer() underscore bug — SC-1 to SC-4 (PR #40)
+- Fix container PATH for python3/pip/bedtools — ENV-1 to ENV-5 (this PR)
 
 ## Pending slices
-- Fix container PATH for Python/pip (ENV-1 to ENV-3): python3/pip not on default
-  $PATH; agents hit rc=127 and abort. Fix Dockerfile ENV or entrypoint + smoke test.
-- Fix bedtools in Docker image (ENV-4 to ENV-5): bedtools returns rc=127 despite
-  being listed as pre-installed; caused 4/7 recqgsfxqqodhjens aborts.
 - Add system prompt rule: rc=0 + empty output ≠ tool missing (SP-1 to SP-2):
   model misreads empty blastn remote output as "not installed"; wastes ~15 steps/attempt.
 - Transient network error retry guidance in system prompt (NR-1 to NR-3): add
