@@ -3,7 +3,8 @@
 ## Last updated
 2026-05-19 — B-1 to B-3: blast_search tool added to harness; _summarize_blast_output()
 helper, BLAST_TOOL constant + dispatch branch in _loop(), system prompt guidance, and
-13 new unit tests. 195/195 tests passing.
+13 new unit tests. 195/195 tests passing. NR-3 manual check also complete (retry rule
+verified in prompts/system.txt and harness/agent.py).
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
@@ -31,7 +32,7 @@ extra attempts to be logged without updating totals). True pass@5 figures above 
 monitor observations of first 5 attempts per problem.
 
 ## Active feature slice
-None — B-1 to B-3 complete (this PR).
+None — B-1 to B-3 and NR-3 complete.
 
 ## Documentation
 - documents/code_walkthroughs/code_flow.md — end-to-end harness walkthrough (single Anthropic provider)
@@ -71,11 +72,10 @@ None — B-1 to B-3 complete (this PR).
 - System prompt: transient network retry rule (30s, up to 3×) — NR-1/NR-2 (PR #42)
 - Rate-limit retry trajectory logging — RL-1 to RL-5 (PR #43)
 - Fix --resume re-runs resource_abort — RBfix-1/RBfix-2 (PR #44)
-- BLAST subagent (blast_search tool, summarizer, 13 unit tests) — B-1 to B-3 (this PR)
+- BLAST subagent (blast_search tool, summarizer, 13 unit tests) — B-1 to B-3 (PR #45)
+- NR-3: verified retry rule in system.txt and agent.py loading (manual check)
 
 ## Pending slices
-- NR-3: Manual check — confirm retry rule appears in trajectory's first logged user
-  message after the next benchmark run
 - Curated bioinformatics tools (structured wrappers for DESeq2, STAR, featureCounts)
 - Comparative re-run benchmark (RERUN-1 to RERUN-4): run preview eval on both
   Claude Sonnet-4-6 and Cerebras/Qwen3 with critic enabled, after all fixes merged.

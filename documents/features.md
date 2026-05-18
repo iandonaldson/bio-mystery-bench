@@ -390,8 +390,10 @@ switching sources.
 Sub-slices:
 - NR-1 ✅: Added retry rule to `prompts/system.txt`
 - NR-2 ✅: Added note to `documents/code_walkthroughs/code_flow.md` §4.1
-- NR-3: Manual check — confirm rule appears in a trajectory's first logged user
-  message after the next benchmark run (system prompt is cache-controlled).
+- NR-3 ✅: Manual check — confirmed rule 4a is in `prompts/system.txt` (lines 104–105)
+  and `harness/agent.py` passes it to the LLM API (`system=self.system_prompt`).
+  System prompt is not written into trajectory JSONL (it is cache-controlled and
+  forwarded directly to the API); verification is by source inspection.
 
 ### ✅ Rate-Limit Retry Trajectory Logging (RL-1 to RL-5, PR #43)
 Log each Cerebras (or any OpenAI-compatible) 429 backoff event to the trajectory file so
