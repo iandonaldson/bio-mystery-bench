@@ -85,6 +85,30 @@ class TestCleanAnswer:
         text = "FINAL ANSWER: Plasmodium falciparum**"
         assert extract_final_answer(text) == "Plasmodium falciparum"
 
+    # SC-2: underscore regression tests
+    def test_preserves_internal_underscore(self):
+        assert _clean_answer("Sample_01") == "Sample_01"
+
+    def test_preserves_underscores_in_list(self):
+        assert _clean_answer("[Sample_01, Sample_02, Sample_08]") == "[Sample_01, Sample_02, Sample_08]"
+
+    # SC-3: bold wrapping around identifier with underscore
+    def test_strips_bold_wrapping_around_identifier(self):
+        assert _clean_answer("**Sample_01**") == "Sample_01"
+
+
+# ---------------------------------------------------------------------------
+# extract_final_answer underscore regression (SC-2)
+# ---------------------------------------------------------------------------
+
+class TestExtractFinalAnswerUnderscore:
+    def test_preserves_underscore_in_identifier(self):
+        assert extract_final_answer("FINAL ANSWER: Sample_01") == "Sample_01"
+
+    def test_preserves_underscores_in_list_answer(self):
+        text = "FINAL ANSWER: [Sample_01, Sample_02, Sample_08]"
+        assert extract_final_answer(text) == "[Sample_01, Sample_02, Sample_08]"
+
 
 # ---------------------------------------------------------------------------
 # _exact_match

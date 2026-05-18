@@ -303,6 +303,9 @@ Results saved to `results/cerebras-qwen3-clean-2/`. Backoff active throughout.
 - hb002 (Bacillus licheniformis): SOLVED on attempt 5 ✓ (brittle) — pass@5=1
 - recqgsfxqqodhjens (CTCF motif): SOLVED on attempts 2 and 5 ✓ — pass@5=1
 - hb022 (pancreatic samples): 0/5 — format mismatch Sample01 vs Sample_01; human_solvable=False
+  NOTE: With the SC-1 fix applied, hb022 attempts 2 and 5 would score correctly — the model's
+  `[Sample_01, ..., Sample_08]` output was right but silently corrupted by `_clean_answer()` to
+  `[Sample01, ...]` before comparison.
 - hb053 (heat stress): 0/5 — model guessed pathogen/phosphate/drought stress; human_solvable=False;
   attempt 4 hit error status (429 retry budget exhausted)
 NOTE: scores.json total_attempts/pass_at_N keys are inconsistent for problems where --resume
