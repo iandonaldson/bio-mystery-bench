@@ -1,38 +1,47 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-19 — B-1 to B-3: blast_search tool added to harness; _summarize_blast_output()
-helper, BLAST_TOOL constant + dispatch branch in _loop(), system prompt guidance, and
-13 new unit tests. 195/195 tests passing. NR-3 manual check also complete (retry rule
-verified in prompts/system.txt and harness/agent.py).
+2026-05-19 — RERUN-1 to RERUN-4 complete: first apples-to-apples comparison run on
+both Claude Sonnet 4.6 and Qwen3-235B (Cerebras) with fully fixed harness and critic
+enabled. NR-3 manual check also complete. scripts/compare_runs.py added. 195/195 tests passing.
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
-providers. 195/195 tests passing. blast_search tool added: BLAST queries now return
-a compact top-N hit summary (outfmt-6 parsed into a readable table) and save full
-results to /workspace/scratch/blast_results.txt, keeping large BLAST outputs out of
-the agent's context window. B-1 to B-3 complete.
+providers. 195/195 tests passing. All prerequisite harness fixes (ENV-1–5, SC-1–4,
+SP-1/2, NR-1/2, RL-1–5, RBfix-1/2, B-1–3) are merged. RERUN-1 to RERUN-4 complete:
+apples-to-apples comparison run done; results recorded below.
 
-Preview benchmark results (all runs on 5-problem preview split):
-- Claude Sonnet 4.6 (Anthropic): 80% pass@1 (from earlier run)
+## Comparative Results (RERUN-2 / RERUN-3, 2026-05-19)
+
+5-problem preview split, 5 attempts each, critic enabled (claude-haiku-4-5-20251001).
+Full comparison report: results/comparison.md
+
+| Metric              | Claude Sonnet 4.6 | Qwen3-235B (Cerebras) |
+|---------------------|-------------------|-----------------------|
+| pass@1              | 60.0%             | 0.0%                  |
+| pass@5              | 60.0%             | 60.0%                 |
+| pass@1 (human-solv) | 100.0%            | 0.0%                  |
+| Brittle fraction    | 0.0%              | 40.0%                 |
+| Total cost (USD)    | $25.44            | $8.59                 |
+
+Per-problem breakdown:
+- hb020 (Homo sapiens PDB):       Sonnet ✅ pass@1 | Qwen3 ✅ pass@5 only (1st attempt wrong)
+- hb002 (Bacillus licheniformis): Sonnet ✅ pass@1 | Qwen3 ✅ pass@5 only (attempts 1,2,4 wrong)
+- recqgsfxqqodhjens (CTCF motif): Sonnet ✅ pass@1 | Qwen3 ✅ pass@5 only (attempts 1-4 wrong)
+- hb022 (pancreatic samples):     Both ❌ 0/5 (human_solvable=False)
+- hb053 (heat stress):            Both ❌ 0/5 (human_solvable=False)
+
+Key finding: Qwen3 solves the same 3 human-solvable problems as Sonnet when given 5 attempts,
+but never on attempt 1 (pass@1=0%). Sonnet is consistently correct on first attempt for all
+3 human-solvable problems (pass@1=100% on human-solvable subset). Qwen3 is 3× cheaper but
+requires multiple attempts — high brittle fraction (40%) reflects this unreliability.
+
+Earlier preview benchmark results (pre-fix harness, for reference):
+- Claude Sonnet 4.6 (Anthropic): 80% pass@1 (from earlier run, without critic)
 - llama-3.3-70b (Groq free tier): 20% pass@1 (1/5 — rest hit 100k token/day limit)
-- Qwen3-235B-A22B (Cerebras free tier): 0% pass@1, 60% pass@5 (3/5) — see notes below
-
-Qwen3 clean run #2 details (results/cerebras-qwen3-clean-2/, 2026-05-18):
-- pass@1: 0.0% | pass@5: 60.0% (3/5 problems) | Total cost: $5.93
-- hb020 (Homo sapiens PDB): SOLVED on attempts 2, 3, 5 ✓
-- hb002 (Bacillus licheniformis): SOLVED on attempt 5 ✓ (brittle — 1/5 only)
-- recqgsfxqqodhjens (CTCF motif): SOLVED on attempts 2 and 5 ✓
-- hb022 (pancreatic samples): 0/5 — format mismatch Sample01 vs Sample_01; human_solvable=False
-- hb053 (heat stress): 0/5 — model guessed pathogen/phosphate/drought; human_solvable=False;
-  attempt 4 hit error (429 retry budget fully exhausted — sustained congestion)
-Backoff fired repeatedly across all problems; all but hb053 attempt 4 recovered successfully.
-NOTE: scores.json pass_at_N keys are inconsistent (resource_abort re-runs via --resume caused
-extra attempts to be logged without updating totals). True pass@5 figures above are from
-monitor observations of first 5 attempts per problem.
 
 ## Active feature slice
-None — B-1 to B-3 and NR-3 complete.
+None — NR-3 and RERUN-1 to RERUN-4 complete (this PR).
 
 ## Documentation
 - documents/code_walkthroughs/code_flow.md — end-to-end harness walkthrough (single Anthropic provider)
@@ -73,13 +82,11 @@ None — B-1 to B-3 and NR-3 complete.
 - Rate-limit retry trajectory logging — RL-1 to RL-5 (PR #43)
 - Fix --resume re-runs resource_abort — RBfix-1/RBfix-2 (PR #44)
 - BLAST subagent (blast_search tool, summarizer, 13 unit tests) — B-1 to B-3 (PR #45)
-- NR-3: verified retry rule in system.txt and agent.py loading (manual check)
+- NR-3: verified retry rule in system.txt and agent.py loading (manual check, PR #46)
+- Comparative re-run benchmark with compare_runs.py — RERUN-1 to RERUN-4 (this PR)
 
 ## Pending slices
 - Curated bioinformatics tools (structured wrappers for DESeq2, STAR, featureCounts)
-- Comparative re-run benchmark (RERUN-1 to RERUN-4): run preview eval on both
-  Claude Sonnet-4-6 and Cerebras/Qwen3 with critic enabled, after all fixes merged.
-  First apples-to-apples comparison with fully fixed harness.
 
 ## Blockers / open questions for human
 - hb022 (pancreatic cancer sample labels) — model consistently uses Sample01 format
