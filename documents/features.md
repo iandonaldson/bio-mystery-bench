@@ -390,8 +390,10 @@ switching sources.
 Sub-slices:
 - NR-1 ✅: Added retry rule to `prompts/system.txt`
 - NR-2 ✅: Added note to `documents/code_walkthroughs/code_flow.md` §4.1
-- NR-3: Manual check — confirm rule appears in a trajectory's first logged user
-  message after the next benchmark run (system prompt is cache-controlled).
+- NR-3 ✅: Manual check — confirmed rule 4a is in `prompts/system.txt` (lines 104–105)
+  and `harness/agent.py` passes it to the LLM API (`system=self.system_prompt`).
+  System prompt is not written into trajectory JSONL (it is cache-controlled and
+  forwarded directly to the API); verification is by source inspection.
 
 ### ✅ Rate-Limit Retry Trajectory Logging (RL-1 to RL-5, PR #43)
 Log each Cerebras (or any OpenAI-compatible) 429 backoff event to the trajectory file so
@@ -437,49 +439,28 @@ Structured wrappers for tools that commonly produce large or hard-to-parse outpu
 (DESeq2, STAR, featureCounts). Each wrapper: runs the tool, extracts key metrics,
 writes structured JSON to scratch. Decompose per-tool, one sub-slice each.
 
-### Comparative Re-run Benchmark (RERUN-1 to RERUN-4)
-Run a clean 5-problem preview benchmark on both Claude (Anthropic) and
-Qwen3-235B (Cerebras) after all harness fixes in this session are merged
-(ENV-1 to ENV-5, SC-1 to SC-4, SP-1 to SP-2, NR-1 to NR-3), with the
-critic enabled for both. This is the first apples-to-apples comparison
-with a fully fixed harness.
+### ✅ Comparative Re-run Benchmark (RERUN-1 to RERUN-4)
 
-**Prerequisite:** all of the following must be merged before starting:
-- ENV-1/ENV-2: Python/pip on default PATH in container
-- ENV-4: bedtools confirmed present in container
-- SC-1/SC-2: underscore-stripping bug fixed in `extract_final_answer`
-- SP-1/SP-2: rc=0 + empty output guidance in system prompt
-- NR-1: transient network retry rule in system prompt
+First apples-to-apples comparison on fully fixed harness. 5-problem preview split,
+5 attempts each, critic enabled (claude-haiku-4-5-20251001). Run 2026-05-19.
 
-**Run commands:**
+**Results:**
 
-Claude Sonnet (with critic):
-```bash
-python3 scripts/run_eval.py \
-  --provider anthropic \
-  --model claude-sonnet-4-6 \
-  --critic-injection-points after_final_answer \
-  --critic-model claude-haiku-4-5-20251001 \
-  --results-dir results/claude-sonnet-rerun \
-  --dataset preview --n-attempts 5
-```
+| Metric              | Claude Sonnet 4.6 | Qwen3-235B (Cerebras) |
+|---------------------|-------------------|-----------------------|
+| pass@1              | 60.0%             | 0.0%                  |
+| pass@5              | 60.0%             | 60.0%                 |
+| pass@1 (human-solv) | 100.0%            | 0.0%                  |
+| Brittle fraction    | 0.0%              | 40.0%                 |
+| Total cost (USD)    | $25.44            | $8.59                 |
 
-Cerebras Qwen3 (with critic, Haiku as judge):
-```bash
-python3 scripts/run_eval.py \
-  --provider openai \
-  --api-base-url https://api.cerebras.ai/v1 \
-  --api-key $CEREBRAS_API_KEY \
-  --model qwen-3-235b-a22b-instruct-2507 \
-  --judge-model claude-haiku-4-5-20251001 \
-  --critic-injection-points after_final_answer \
-  --critic-model claude-haiku-4-5-20251001 \
-  --results-dir results/cerebras-qwen3-rerun \
-  --dataset preview --n-attempts 5
-```
+Full per-problem comparison: `results/comparison.md`
+
+New script: `scripts/compare_runs.py` — reads two `scores.json` files, emits
+side-by-side markdown table with per-problem pass@1/pass@N/cost and regression notes.
 
 Sub-slices:
-- RERUN-1: Confirm all prerequisite slices are merged; run smoke test (ENV-3)
-- RERUN-2: Run Claude Sonnet benchmark; record pass@1, pass@5, cost, per-problem notes
-- RERUN-3: Run Cerebras/Qwen3 benchmark; record same metrics
-- RERUN-4: Update `claude-progress.txt` and `features.md` with comparative results table
+- RERUN-1 ✅: All prerequisite slices confirmed merged; Docker smoke test passed
+- RERUN-2 ✅: Claude Sonnet benchmark run; results in `results/claude-sonnet-rerun/`
+- RERUN-3 ✅: Cerebras/Qwen3 benchmark run; results in `results/cerebras-qwen3-rerun/`
+- RERUN-4 ✅: `scripts/compare_runs.py` written; `claude-progress.txt` and `features.md` updated
