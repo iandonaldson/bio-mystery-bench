@@ -287,3 +287,38 @@ confirms rc=0 in a fresh container shell. The fix (ENV-1/ENV-2) adds the conda b
 directory to `$PATH` in the Dockerfile. Until that fix is merged, agents working in
 the container should prefix commands with the full path `/opt/conda/bin/python3` or
 run `export PATH=/opt/conda/bin:$PATH` as a first step.
+
+---
+
+## L-14: Unquoted env vars silently drop CLI arguments, causing cryptic parse errors
+
+**Lesson (2026-05-19):** When `$CEREBRAS_API_KEY` was unset, the shell expanded it to
+nothing, turning `--api-key $CEREBRAS_API_KEY --model qwen-3-...` into
+`--api-key --model qwen-3-...`. Click consumed `--model` as the *value* of `--api-key`,
+then saw `qwen-3-235b-a22b-instruct-2507` as an unexpected positional argument:
+
+```
+Error: Got unexpected extra argument (qwen-3-235b-a22b-instruct-2507)
+```
+
+No warning was emitted about the missing key — the error looked like a model-name bug.
+
+**Rule:** Always double-quote env vars in shell commands: `--api-key "$CEREBRAS_API_KEY"`.
+With quotes, an unset var passes an empty string to the option (which gives a clear
+"empty api key" error) rather than silently collapsing the argument list.
+
+---
+
+## L-15: API keys live in the main repo root .env, not in the worktree
+
+**Lesson (2026-05-19):** `CEREBRAS_API_KEY` (and other provider keys) are stored in
+`/Users/ian/Documents/Claude/bio-mystery-bench/.env`. Worktrees do not have their own
+`.env` — the file is gitignored at the repo root.
+
+**Rule:** When running benchmark commands from a fresh shell or a worktree, source the
+main repo `.env` first:
+```bash
+set -a && source /Users/ian/Documents/Claude/bio-mystery-bench/.env && set +a
+```
+Alternatively, pass the key explicitly: `--api-key "$CEREBRAS_API_KEY"` after sourcing.
+Do not assume the key is already exported in the shell environment.
