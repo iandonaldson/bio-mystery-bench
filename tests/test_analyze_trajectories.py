@@ -297,6 +297,33 @@ class TestCompareRawVsCleaned:
 
 
 # ---------------------------------------------------------------------------
+# _find_data_cache
+# ---------------------------------------------------------------------------
+
+class TestFindDataCache:
+    def test_finds_cache_two_levels_up(self, tmp_path):
+        results_dir = tmp_path / "results" / "run_name"
+        results_dir.mkdir(parents=True)
+        cache_dir = tmp_path / ".data-cache"
+        cache_dir.mkdir()
+        found = at._find_data_cache(str(results_dir))
+        assert found == str(cache_dir)
+
+    def test_finds_cache_one_level_up(self, tmp_path):
+        results_dir = tmp_path / "results"
+        results_dir.mkdir()
+        cache_dir = tmp_path / ".data-cache"
+        cache_dir.mkdir()
+        found = at._find_data_cache(str(results_dir))
+        assert found == str(cache_dir)
+
+    def test_returns_none_when_missing(self, tmp_path):
+        results_dir = tmp_path / "results" / "run_name"
+        results_dir.mkdir(parents=True)
+        assert at._find_data_cache(str(results_dir)) is None
+
+
+# ---------------------------------------------------------------------------
 # SK-9: generate_llm_fields
 # ---------------------------------------------------------------------------
 
