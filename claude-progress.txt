@@ -1,9 +1,9 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-19 — RERUN-1 to RERUN-4 complete: first apples-to-apples comparison run on
-both Claude Sonnet 4.6 and Qwen3-235B (Cerebras) with fully fixed harness and critic
-enabled. NR-3 manual check also complete. scripts/compare_runs.py added. 195/195 tests passing.
+2026-05-19 — Post-mortem complete. analyze_trajectories.py skill created (53 new tests;
+248/248 passing). trajectory_analysis.csv/md written for both RERUN result sets.
+Post-mortem document written to documents/code_walkthroughs/6.2026-05-19_rerun_postmortem.md.
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
