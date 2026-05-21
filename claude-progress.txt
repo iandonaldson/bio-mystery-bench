@@ -1,9 +1,10 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-19 — Post-mortem complete. analyze_trajectories.py skill created (53 new tests;
-248/248 passing). trajectory_analysis.csv/md written for both RERUN result sets.
-Post-mortem document written to documents/code_walkthroughs/6.2026-05-19_rerun_postmortem.md.
+2026-05-21 — Fixed hb022 scorer bug (PR #53). Added _normalize_list() and _list_match()
+to harness/scorer.py; 11 new tests (66 total in test_scorer.py). Updated
+documents/code_walkthroughs/3.Accommodating_OpenAI_models.md to document the new
+4-step score_answer pipeline (PR #54).
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
@@ -83,14 +84,14 @@ None — NR-3 and RERUN-1 to RERUN-4 complete (this PR).
 - Fix --resume re-runs resource_abort — RBfix-1/RBfix-2 (PR #44)
 - BLAST subagent (blast_search tool, summarizer, 13 unit tests) — B-1 to B-3 (PR #45)
 - NR-3: verified retry rule in system.txt and agent.py loading (manual check, PR #46)
-- Comparative re-run benchmark with compare_runs.py — RERUN-1 to RERUN-4 (this PR)
+- Comparative re-run benchmark with compare_runs.py — RERUN-1 to RERUN-4 (PR #51)
+- Fix hb022 scorer: list normalisation step in score_answer() — PR #53
+- docs: update walkthrough 3 with 4-step score_answer pipeline — PR #54
 
 ## Pending slices
 - Curated bioinformatics tools (structured wrappers for DESeq2, STAR, featureCounts)
 
 ## Blockers / open questions for human
-- hb022 (pancreatic cancer sample labels) — model consistently uses Sample01 format
-  not Sample_01. Scorer is strict. human_solvable=False. Known unfixable without scorer change.
 - hb053 (heat stress) — model cannot identify heat stress from Brachypodium transcriptome;
   guesses pathogen/phosphate/drought stress. human_solvable=False.
 - Cerebras 429 queue-exceeded errors: backoff handles transient congestion but hb053 attempt 4
@@ -100,7 +101,8 @@ None — NR-3 and RERUN-1 to RERUN-4 complete (this PR).
 - Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md
 
 ## Test status
-195/195 tests passing.
+261/262 passing. 1 pre-existing failure: TestFindDataCache::test_returns_none_when_missing
+finds .data-cache at worktree root — unrelated to any recent change.
 
 ## Notes for next agent session
 - Provider flags: --provider anthropic|openai|ollama|groq, --api-base-url, --api-key, --judge-model
