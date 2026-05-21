@@ -283,6 +283,20 @@ def _list_data_files(data_dir: Optional[str]) -> str:
         return "unable to list data files"
 
 
+def _find_data_cache(results_dir: str) -> Optional[str]:
+    """Walk up from results_dir looking for a .data-cache directory."""
+    candidates = [
+        os.path.join(results_dir, "..", "..", ".data-cache"),  # 2 levels up (typical)
+        os.path.join(results_dir, "..", ".data-cache"),        # 1 level up
+        os.path.join(os.getcwd(), ".data-cache"),              # cwd fallback
+    ]
+    for c in candidates:
+        c = os.path.abspath(c)
+        if os.path.isdir(c):
+            return c
+    return None
+
+
 def generate_llm_fields(
     question: str,
     rubric: str,
@@ -521,6 +535,8 @@ def main() -> None:
                         help="Model used for the LLM judge (recorded in output)")
     parser.add_argument("--problem-ids",
                         help="Comma-separated list of problem IDs to process (default: all)")
+    parser.add_argument("--data-cache-dir",
+                        help="Path to .data-cache dir (auto-detected if omitted)")
     parser.add_argument("--anthropic-api-key",
                         help="Anthropic API key (fallback: ANTHROPIC_API_KEY env var)")
     args = parser.parse_args()
@@ -530,6 +546,15 @@ def main() -> None:
     traj_dir = os.path.join(results_dir, "trajectories")
 
     scores = load_scores(scores_path)
+
+    data_cache_dir = getattr(args, "data_cache_dir", None)
+    if data_cache_dir is None:
+        data_cache_dir = _find_data_cache(results_dir)
+        if data_cache_dir:
+            print(f"[main] Auto-detected data cache: {data_cache_dir}", file=sys.stderr)
+        else:
+            print("[main] Warning: .data-cache not found; data_desc will be limited",
+                  file=sys.stderr)
 
     if args.problem_ids:
         filter_ids = {pid.strip() for pid in args.problem_ids.split(",")}
@@ -575,7 +600,14 @@ def main() -> None:
                     question=problem_meta.get("question", ""),
                     rubric=problem_meta.get("answer_rubric", ""),
                     predicted=str(attempt_data.get("predicted", "") or ""),
-                    data_dir=None,
+                    data_dir=(
+                        os.path.join(data_cache_dir, problem_id, "extracted")
+                        if data_cache_dir
+                        and os.path.isdir(
+                            os.path.join(data_cache_dir, problem_id, "extracted")
+                        )
+                        else None
+                    ),
                     client=llm_client,
                     critic_response=critic_resp,
                 )
