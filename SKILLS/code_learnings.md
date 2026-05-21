@@ -322,3 +322,46 @@ set -a && source /Users/ian/Documents/Claude/bio-mystery-bench/.env && set +a
 ```
 Alternatively, pass the key explicitly: `--api-key "$CEREBRAS_API_KEY"` after sourcing.
 Do not assume the key is already exported in the shell environment.
+
+---
+
+## L-16: A constant suspicious value across many rows signals an early-return code path
+
+**Lesson (2026-05-21):** `data_desc` showed "no data directory found" for 20/25 Sonnet
+rows and 17/25 Qwen3 rows in the trajectory analysis. The uniformity was the tell — a
+genuine "no data" result would not be this consistent across problems that clearly used
+data files.
+
+**Diagnosis pattern:** When an analysis column shows the same fallback string in the
+majority of rows, grep for where that string is returned and look for an early-return
+triggered by a None/missing input. Here: `_list_data_files(None)` returned immediately
+without reading the filesystem because `data_dir=None` was hardcoded at the call site.
+
+**Rule:** If an analysis script computes per-row metadata that requires a file path,
+auto-detect the path rather than passing `None` and relying on a fallback message.
+Walk up from the output directory to find data caches, config files, etc. If auto-
+detection fails, print a warning to stderr rather than silently returning a misleading
+default value.
+
+---
+
+## L-17: Post-hoc analysis scripts and live harness components are independent pipelines
+
+**Lesson (2026-05-21):** The `data_desc` bug in `analyze_trajectories.py` (L-16)
+prompted the question: did the wrong `data_desc` corrupt the critic's behavior during
+the actual runs?
+
+**Answer: no.** The critic runs *during* evaluation by reading `self.messages` — the
+live conversation history. `analyze_trajectories.py` is a post-hoc script that reads
+JSONL trajectories *after* the run completes. The two pipelines share no state.
+
+**Consequence for debugging:** When trajectory analysis output looks suspicious, first
+determine whether the suspicious column comes from:
+1. **Deterministic extraction** from JSONL records (e.g. `critics_response`,
+   `number_API_backoffs_fired`) — these accurately reflect what happened in the run.
+2. **LLM-generated fields** (e.g. `data_desc`, `notes`, `objectively_correct`) — these
+   can be wrong if the analysis script passed bad inputs to the LLM.
+
+A bug in LLM-generated analysis fields cannot retroactively change what the critic or
+agent did. Only a bug in the harness itself (`harness/agent.py`, `harness/scorer.py`)
+can do that.
