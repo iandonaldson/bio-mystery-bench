@@ -47,7 +47,12 @@ def score_answer(predicted: str, rubric: str, client: Optional[Any] = None) -> b
     if numeric_result is not None:
         return numeric_result
 
-    # 3. LLM-as-judge fallback (requires API client)
+    # 3. List normalisation — handles bracket/quote format mismatches (e.g. hb022)
+    list_result = _list_match(predicted, rubric)
+    if list_result is True:
+        return True
+
+    # 4. LLM-as-judge fallback (requires API client)
     if client is not None:
         return _llm_judge(predicted, rubric, client)
 
@@ -91,6 +96,37 @@ def _extract_rubric_answer(rubric: str) -> Optional[str]:
     m = _RUBRIC_ANSWER_RE.search(rubric)
     if m:
         return m.group(1).strip().rstrip(".,;")
+    return None
+
+
+def _normalize_list(text: str) -> Optional[list[str]]:
+    """Parse a comma-separated identifier list, tolerant of brackets and quotes.
+
+    Accepts: [A, B, C]  |  'A', 'B', 'C'  |  A', 'B', 'C  (malformed leading quote)
+    Returns sorted list of non-empty items, or None if fewer than 2 items found.
+    """
+    cleaned = text.strip().strip("[]").replace("'", "").replace('"', "")
+    items = [item.strip() for item in cleaned.split(",")]
+    items = [item for item in items if item and item != "..."]
+    return sorted(items) if len(items) >= 2 else None
+
+
+def _list_match(predicted: str, rubric: str) -> Optional[bool]:
+    """Return True/False/None for list-typed answers.
+
+    True  — both parse as lists and contain the same identifiers
+    False — both parse as same-length lists but items differ
+    None  — can't determine (not list-shaped, or different lengths)
+    """
+    rubric_answer = _extract_rubric_answer(rubric) or rubric
+    pred_list = _normalize_list(predicted)
+    rub_list = _normalize_list(rubric_answer)
+    if pred_list is None or rub_list is None:
+        return None
+    if pred_list == rub_list:
+        return True
+    if len(pred_list) == len(rub_list):
+        return False
     return None
 
 
