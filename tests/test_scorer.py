@@ -10,6 +10,8 @@ from harness.scorer import (
     _numeric_match,
     _parse_number,
     _clean_answer,
+    _normalize_list,
+    _list_match,
 )
 
 
@@ -193,6 +195,67 @@ class TestNumericMatch:
 
 
 # ---------------------------------------------------------------------------
+# _normalize_list
+# ---------------------------------------------------------------------------
+
+class TestNormalizeList:
+    def test_bracket_format(self):
+        result = _normalize_list("[Sample_01, Sample_02, Sample_03]")
+        assert result == ["Sample_01", "Sample_02", "Sample_03"]
+
+    def test_malformed_rubric_missing_opening_quote(self):
+        # hb022 rubric: leading [' was dropped, leaving Sample_01', 'Sample_02', ...
+        text = "Sample_01', 'Sample_02', 'Sample_03'"
+        result = _normalize_list(text)
+        assert result == ["Sample_01", "Sample_02", "Sample_03"]
+
+    def test_single_value_returns_none(self):
+        assert _normalize_list("Sample_01") is None
+
+    def test_ellipsis_items_filtered(self):
+        result = _normalize_list("[Sample_01, ..., Sample_08]")
+        assert "..." not in result
+        assert "Sample_01" in result
+
+    def test_quoted_and_unquoted_produce_same_result(self):
+        quoted = _normalize_list("['Sample_01', 'Sample_02']")
+        unquoted = _normalize_list("[Sample_01, Sample_02]")
+        assert quoted == unquoted
+
+
+# ---------------------------------------------------------------------------
+# _list_match
+# ---------------------------------------------------------------------------
+
+HB022_RUBRIC = (
+    "Give all or nothing credit. Do not award partial credit. "
+    "The answer is: Sample_01', 'Sample_02', 'Sample_03', 'Sample_04', "
+    "'Sample_05', 'Sample_06', 'Sample_07', 'Sample_08' "
+    "Score 1.0 if the answer meets the criteria above, 0.0 otherwise. No partial credit."
+)
+HB022_PREDICTED = (
+    "[Sample_01, Sample_02, Sample_03, Sample_04, Sample_05, Sample_06, Sample_07, Sample_08]"
+)
+
+
+class TestListMatch:
+    def test_hb022_scenario(self):
+        assert _list_match(HB022_PREDICTED, HB022_RUBRIC) is True
+
+    def test_both_bracket_format_match(self):
+        assert _list_match("[A, B, C]", "[A, B, C]") is True
+
+    def test_same_length_different_items_returns_false(self):
+        assert _list_match("[Sample_01, Sample_02]", "[Sample_01, Sample_03]") is False
+
+    def test_different_lengths_returns_none(self):
+        assert _list_match("[Sample_01, Sample_02, Sample_03]", "[Sample_01, Sample_02]") is None
+
+    def test_single_value_non_list_returns_none(self):
+        assert _list_match("Homo sapiens", "Homo sapiens") is None
+
+
+# ---------------------------------------------------------------------------
 # score_answer (no API client — only exact + numeric paths exercised)
 # ---------------------------------------------------------------------------
 
@@ -211,6 +274,10 @@ class TestScoreAnswer:
 
     def test_numeric_outside_tolerance_scores_false(self):
         assert score_answer("99", "3.5") is False
+
+    def test_list_format_matches_despite_format_difference(self):
+        # hb022: bracket format vs malformed Python-literal rubric — no client needed
+        assert score_answer(HB022_PREDICTED, HB022_RUBRIC) is True
 
 
 # ---------------------------------------------------------------------------
