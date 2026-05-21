@@ -365,3 +365,38 @@ determine whether the suspicious column comes from:
 A bug in LLM-generated analysis fields cannot retroactively change what the critic or
 agent did. Only a bug in the harness itself (`harness/agent.py`, `harness/scorer.py`)
 can do that.
+
+---
+
+## L-18: Rubric format mismatches need scorer normalisation, not upstream dataset fixes
+
+**Lesson (2026-05-21):** The hb022 rubric is malformed — the intended answer was a
+Python list `['Sample_01', ..., 'Sample_08']` but the leading `['` was stripped when
+the dataset was built, leaving `Sample_01', 'Sample_02', ...`. Models correctly followed
+the question's example format and output `[Sample_01, ..., Sample_08]`. Neither
+exact-match nor the LLM judge recognised the two formats as equivalent, so every correct
+attempt scored wrong.
+
+**Why not fix the dataset?** Patching a HuggingFace dataset record requires a new dataset
+commit and all users pulling a new revision. The scorer fix is local, testable, and covers
+any future problem with the same format mismatch.
+
+**Pattern (from harness/scorer.py, PR #53):** Add a list-normalisation step that strips
+brackets/quotes, splits by comma, sorts, and compares:
+```python
+def _normalize_list(text: str) -> Optional[list[str]]:
+    cleaned = text.strip().strip("[]").replace("'", "").replace('"', "")
+    items = [item.strip() for item in cleaned.split(",")]
+    items = [item for item in items if item and item != "..."]
+    return sorted(items) if len(items) >= 2 else None
+```
+
+**Return contract for format-normalisation steps:** Return `True`/`False`/`None`, not
+`bool`. Only `True` should short-circuit `score_answer`; `False` and `None` fall through
+to the LLM judge. This is safe: wrong answers and ambiguous formats still get judged; only
+confirmed matches skip the API call.
+
+**When to add a new normalisation step:** when you observe a pattern where the model's
+predicted format and the rubric format differ structurally but are semantically equivalent
+(list syntax, unit differences, synonym resolution). Add the step before the LLM judge,
+unit-test it with the real rubric string, and update `documents/code_walkthroughs/3.Accommodating_OpenAI_models.md` section §7.
