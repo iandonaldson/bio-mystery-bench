@@ -790,3 +790,24 @@ class TestSkillFiles:
         assert "gseapy.ssgsea" in body or "gp.ssgsea" in body
         # Install-on-demand note must be present (no pre-install in Docker).
         assert "pip install gseapy" in body
+
+    def test_skill_file_chipseq_tf_id_has_frontmatter_and_two_recipes(self):
+        path = SKILLS_ROOT / "chipseq-tf-identification" / "SKILL.md"
+        fm, body = _parse_skill_frontmatter(path)
+        assert fm["name"] == "chipseq-tf-identification"
+        assert "description" in fm and fm["description"].strip()
+        # Two recipes — each must have its own H2 heading containing "Recipe N".
+        recipe_headings = re.findall(r"^##\s+Recipe\s+\d+", body, re.MULTILINE)
+        assert len(recipe_headings) == 2, (
+            f"expected 2 '## Recipe N' headings, got {recipe_headings}"
+        )
+        # Both pillars must appear: local PWM scan and JASPAR REST API.
+        assert "pyjaspar" in body
+        assert "Bio.motifs" in body
+        assert "bedtools getfasta" in body
+        assert "https://jaspar.genereg.net/api/v1" in body
+        # Genome-assembly guidance must mention at least hg38 and mm10.
+        assert "hg38" in body
+        assert "mm10" in body
+        # Install-on-demand note must be present (no pre-install in Docker).
+        assert "pip install pyjaspar" in body
