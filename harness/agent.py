@@ -675,7 +675,7 @@ def _get_blast_version(container: Container, program: str) -> str:
     """Run `<program> -version` in the container and return its first stdout line.
 
     Returns "" on non-zero exit, timeout, or any other failure. Used to disambiguate
-    empty BLAST results from a missing binary (see L-12 in SKILLS/code_learnings.md).
+    empty BLAST results from a missing binary (see L-12 in SKILLS/code-learnings/SKILL.md).
     """
     try:
         stdout, _stderr, rc = container.exec_command(f"{program} -version", timeout=5)

@@ -517,3 +517,5 @@ To replicate Anthropic's published numbers you need the full 99-problem dataset 
 - [Code walkthrough: harness end-to-end](documents/code_walkthroughs/code_flow.md)
 - [Code walkthrough: multi-provider LLM backend](documents/code_walkthroughs/2.llm_backend_expansion.md)
 - [Code walkthrough: critic agent, prompt engineering, API hardening](documents/code_walkthroughs/3.Accommodating_OpenAI_models.md)
+- [Code walkthrough: second critic exchange + FINAL ANSWER marker enforcement (CR2 + FA)](documents/code_walkthroughs/7.Agent_C_walkthrough.md)
+- [Code walkthrough: empty BLAST disambiguation + critic prompt alternatives (BE + CP)](documents/code_walkthroughs/8.Agent_B_walkthrough.md)

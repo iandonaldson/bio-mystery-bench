@@ -1,4 +1,19 @@
-# Code Learnings — BioMysteryBench Harness
+---
+name: code-learnings
+description: >
+  Durable index of lessons learned in past BioMysteryBench harness sessions,
+  numbered L-01, L-02, …, L-NN. Every session must read it at startup
+  (mandated by CLAUDE.md) and append to it at session-end when a non-obvious
+  bug, workflow constraint, or successful unusual approach was discovered.
+  Use this skill whenever the user asks to "add a learning", "record a
+  lesson", "save what we just learned", to write up a post-mortem finding,
+  or to reference a specific learning by ID ("L-12", "L-21"). Trigger even
+  when the user just says "this is worth remembering" or "we should write
+  this down for future agents". Do not invent learnings — every entry must
+  cite a specific PR, commit, or incident.
+---
+
+# code-learnings skill
 
 This file records lessons learned from past agent sessions. Read it after
 `claude-progress.txt` and `documents/features.md`, before implementing anything.
@@ -448,3 +463,46 @@ git checkout -b claude/<slice-name> origin/main
 
 This sets up tracking automatically and ensures the branch starts from the latest main
 without needing to check out main locally.
+
+---
+
+## L-21: Parallel agents must keep `__init__` and `_loop` in sync — partition by attribute, not by file
+
+**Lesson (2026-05-22):** During the four-agent Qwen3 post-mortem, the orchestration brief
+told each agent to touch `AgentRun.__init__` only for its own field (Agent C: `_critic_rounds`,
+Agent B: `_blast_versions`, Agent A: `_final_answer_reprompted`). The intent was to keep
+PRs disjoint and avoid merge conflicts. The mechanism worked for the conflict-avoidance goal
+— BE only conflicted once with CR2, on the line itself, and the resolution was trivial.
+
+It failed for a different reason. Agent A's FA PR (#58) added a reference to
+`self._final_answer_reprompted` inside `_loop` but never assigned it in `__init__`. The PR
+passed CI in isolation because FA's own tests stubbed `AgentRun` in a way that avoided
+the bug. The moment FA merged, every other test in the suite that drove `AgentRun.run()`
+through the `end_turn` path started raising `AttributeError`. Four tests on `main` broke
+between FA's merge and the next PR's merge — including two of Agent B's BE-4 integration
+tests that had been green when written.
+
+CP-1 had to fold in the one-line fix (`self._final_answer_reprompted: bool = False`) before
+its own tests could pass.
+
+**Rule:** When parallel agents partition `__init__` work by attribute, every PR that adds
+a `self.X` *reference* in `_loop` must also add the matching `self.X = ...` *initialiser*
+in `__init__` — even if the brief tells the agent not to touch `__init__`. Initialisers
+are not optional, they are part of the reference.
+
+**Detection (until a CI guard exists):**
+- After any merge that touches `_loop`, run the full suite from `origin/main` before
+  starting the next branch. A single `AttributeError: 'AgentRun' object has no attribute …`
+  in unrelated tests is the signature.
+- Grep before pushing: `grep -oE 'self\._[a-z_]+' harness/agent.py | sort -u` should be a
+  subset of `grep -oE 'self\._[a-z_]+ *=' harness/agent.py | sort -u`.
+
+**Proposed CI guard (see `claude-progress.txt` → Next steps):** an AST-based unit test
+that walks `AgentRun.__init__` for `self.X = …` assignments and `AgentRun._loop` for
+`self.X` reads, then asserts the read set is a subset of the assign set.
+
+**Generalised lesson:** "Disjoint file edits" is not the same as "disjoint
+semantic surface area." When the surface is a single class, partition by attribute
+ownership *and* require each PR to keep that class internally consistent — references
+without initialisers are a defect, even if they sit on different lines from someone else's
+new field.
