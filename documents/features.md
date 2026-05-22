@@ -332,7 +332,7 @@ Tests: `TestOpenAIProviderRateLimitBackoff` in `tests/test_agent_helpers.py` (5 
 ## Pending Slices
 
 > **Before implementing any slice below**, decompose it into sub-slices per the
-> elephant carpaccio rule in `SKILLS/code_learnings.md` (L-05). Each sub-slice
+> elephant carpaccio rule in `SKILLS/code-learnings/SKILL.md` (L-05). Each sub-slice
 > needs its own unit test; do not rely solely on integration testing.
 
 ### ✅ Fix container PATH so Python/pip/bedtools are available on default shell (ENV-1 to ENV-5)
@@ -511,23 +511,47 @@ When BLAST returns no hits, the summary previously said "No BLAST hits found", w
 the model could not distinguish from "BLAST is not installed." New behaviour explicitly
 confirms the tool is present and version-stamped, then lists four concrete alternatives.
 
-Sub-slices:
-- BE-1 ✅: Add `_get_blast_version(program)` helper — shells out to `<program> -version`,
-  parses version string
-- BE-2 ✅: Add `_blast_versions: dict[str, str] = {}` cache to `AgentRun.__init__`
-- BE-3 ✅: Update `_summarize_blast_output` — on empty result, call `_get_blast_version`
-  and emit "<program> installed (version …) — no hits returned. Alternatives: …"
-- BE-4 ✅: 9 new unit tests in `TestBlastVersionAndSummary`
+Sub-slices (one commit each; 9 new unit tests in `TestBlastVersionAndSummary` distributed
+across BE-1 → BE-4):
+- BE-1 ✅: Add `_get_blast_version(container, program)` module-level helper — runs
+  `<program> -version` via `container.exec_command` with a 5 s timeout; returns the first
+  stdout line on rc==0, otherwise `""`. Three unit tests cover success, non-zero rc, and timeout.
+- BE-2 ✅: Add `self._blast_versions: dict[str, str] = {}` cache to `AgentRun.__init__`.
+  One unit test verifies the cache starts empty.
+- BE-3 ✅: Extend `_summarize_blast_output` signature with `program` and `version` parameters.
+  On empty hits the summary now reads "No hits at default parameters. `<program>` installed
+  (version `<version>`). Anonymised sequences may not match nt/nr. Consider: (a) `-evalue 1`,
+  (b) shorter query, (c) `-task blastn-short` for very short queries, (d) different program
+  (`blastn`↔`blastx`)." Non-empty tabular output is unchanged. Three new unit tests cover
+  with-version, without-version (backward-compat), and the non-empty regression path.
+- BE-4 ✅: Wire the cache through the `blast_search` dispatch branch in `_loop` — on miss,
+  call `_get_blast_version` and cache the result; pass `program` and `version` into
+  `_summarize_blast_output`. Two integration-style tests drive `AgentRun.run()` with a
+  scripted `client.chat` and a side-effect container to assert (a) the version probe runs
+  only once across two same-program BLAST calls and (b) the rendered tool_result contains
+  both the program name and the version string when BLAST returns no hits.
 
 ### ✅ CP: Critic Prompt Requires Concrete Alternatives (CP-1 to CP-3, PR #59)
 
 Strengthens the critic prompt: each HIGH-risk flag must include 1-2 alternative answers
 with citations, labelled (A) wrong-on-evidence or (B) unverified; `_format_critic_injection`
 asks the agent to test the strongest-evidence alternative. Also folds in a fix for a missing
-`_final_answer_reprompted = False` initialiser left out of FA (broken 4 tests on main).
+`_final_answer_reprompted = False` initialiser left out of FA (broke 4 tests on main between
+the FA and CP merges).
 
-Sub-slices:
-- CP-1 ✅: Rewrite `CRITIC_SYSTEM_PROMPT` — mandatory alternatives + citation requirement
-- CP-2 ✅: Update `_format_critic_injection` — adds "test the strongest-evidence alternative" cue
-- CP-3 ✅: 3 new unit tests in `TestCriticPromptAlternatives`; fix missing `_final_answer_reprompted`
-  initialiser in `AgentRun.__init__` (regression guard: 4 previously-failing tests now pass)
+Sub-slices (one commit each; 3 new unit tests in `TestCriticPromptAlternatives` distributed
+across CP-1 → CP-3):
+- CP-1 ✅: Append the alternatives requirement to `CRITIC_SYSTEM_PROMPT` — every HIGH-risk
+  flag must list 1–2 alternative answers consistent with the trajectory's evidence and cite
+  the specific trajectory step that supports each. Closing rule: "Do not invent claims the
+  agent did not make." Also folds in the missing
+  `self._final_answer_reprompted: bool = False` initialiser introduced by FA, which had been
+  breaking 4 tests on `main` (both FA's own tests and BE-4's integration tests) post-FA-merge.
+- CP-2 ✅: Append the outcome-distinction requirement to `CRITIC_SYSTEM_PROMPT` — the critic
+  must label its verdict as one of two outcomes: (A) agent answer appears wrong on the
+  evidence (list alternatives) or (B) agent answer may be correct but unverified (state
+  which assumption to verify). Gives the second critic round (CR2) a clean binary to act on.
+- CP-3 ✅: Modify `_format_critic_injection` — adds a bullet to the agent's instruction list:
+  "If the critic listed alternatives, test the one with the strongest evidence support before
+  restating your answer." Closes the CP-1 loop so the agent acts on alternatives rather than
+  re-stating its original conclusion.

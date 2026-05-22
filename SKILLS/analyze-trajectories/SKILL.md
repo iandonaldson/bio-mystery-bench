@@ -23,7 +23,7 @@ Runs `scripts/analyze_trajectories.py` against a benchmark results directory and
 ## Prerequisites
 
 - `ANTHROPIC_API_KEY` must be set (or passed via `--anthropic-api-key`)
-- Run from the project worktree root (see L-15 in SKILLS/code_learnings.md: source `.env` first)
+- Run from the project worktree root (see L-15 in SKILLS/code-learnings/SKILL.md: source `.env` first)
 
 ## Standard invocation
 

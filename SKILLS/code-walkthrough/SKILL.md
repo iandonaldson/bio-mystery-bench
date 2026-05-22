@@ -1,4 +1,21 @@
-# Skill: code_walkthrough
+---
+name: code-walkthrough
+description: >
+  Produce a single-source structured reference document — a "code walkthrough"
+  — for a feature slice, a set of related PRs, or a module of the
+  BioMysteryBench harness. The output lives in
+  `documents/code_walkthroughs/<N>.<descriptive_name>.md` and follows a
+  prescribed structure: header block, ToC, background, per-function trace in
+  call order, concept boxes, acronym glossary, ASCII data-flow diagram,
+  module map, testing section, configuration examples, further reading.
+  Use this skill whenever the user says "write a walkthrough", "document
+  this feature", "explain how X works end-to-end", "produce a walkthrough
+  for PR #N", or whenever a session-close routine reaches its
+  "write a walkthrough" step. Trigger even if the user just says
+  "document this PR" or "explain the flow" without using the word walkthrough.
+---
+
+# code-walkthrough skill
 
 ## When to invoke
 
