@@ -464,3 +464,52 @@ Sub-slices:
 - RERUN-2 ✅: Claude Sonnet benchmark run; results in `results/claude-sonnet-rerun/`
 - RERUN-3 ✅: Cerebras/Qwen3 benchmark run; results in `results/cerebras-qwen3-rerun/`
 - RERUN-4 ✅: `scripts/compare_runs.py` written; `claude-progress.txt` and `features.md` updated
+
+---
+
+### ✅ Qwen3 Trajectory Post-Mortem Remediations — Second Critic Exchange (CR2-1 to CR2-5)
+
+Root cause addressed: Qwen3's first-attempt errors (hb002_a4, hb053_a3, recq_a0) showed the
+critic flagged HIGH-risk assumptions that the agent addressed only verbally, never via a follow-up
+tool call. The single-critic design had no mechanism to verify whether remediation was genuine.
+
+**Changes (all in `harness/agent.py`, `harness/config.py`, `scripts/run_eval.py`):**
+- `_critic_injected: bool` replaced with `_critic_rounds: int` — allows counting critic exchanges
+- New `CRITIC_INJECTION_POINTS` value: `"after_critic_response"` — enables a second critic exchange
+- New `RunConfig.max_critic_rounds: int = 2` — caps exchanges to prevent infinite loops
+- New `CRITIC_FOLLOWUP_PROMPT` — round 2+ asks the critic to classify each prior HIGH-risk concern
+  as `verified`, `verified-wrong`, or `unverified-verbal-only`, and list alternative answers if any
+  remain unverified-verbal-only
+- `_run_critic()` gains a `system_prompt` parameter (defaults to `CRITIC_SYSTEM_PROMPT`)
+- Trajectory logger now records `"round"` in each `critic` event
+- CLI: `--critic-injection-points` now accepts `after_critic_response`; new `--max-critic-rounds` flag
+
+Sub-slices (PR #57, merged 2026-05-22):
+- CR2-1 ✅: `_critic_injected` → `_critic_rounds`
+- CR2-2 ✅: extend `CRITIC_INJECTION_POINTS`; add `max_critic_rounds` to `RunConfig`
+- CR2-3 ✅: `CRITIC_FOLLOWUP_PROMPT` constant
+- CR2-4 ✅: second-round invocation logic in `_loop`; `system_prompt` param in `_run_critic`; round logging
+- CR2-5 ✅: CLI flags wired into `RunConfig`
+
+**Tests:** `TestCriticMultiRound` (8 tests) + `TestRunEvalCriticFlags` (3 tests) in `tests/test_agent_helpers.py`.
+
+---
+
+### ✅ Qwen3 Trajectory Post-Mortem Remediations — Enforce FINAL ANSWER Marker (FA-1 to FA-3)
+
+Root cause addressed: Qwen3 trajectories sometimes ended without a `FINAL ANSWER:` line, causing
+`extract_final_answer` to fall back to the last non-empty line — an unreliable heuristic.
+
+**Changes (all in `harness/agent.py`):**
+- New `_has_final_answer_marker(text)` helper — regex `r"FINAL ANSWER:\s*\S"` detects the marker
+- New `AgentRun._final_answer_reprompted: bool` flag — ensures the re-prompt fires at most once
+- In `_loop` end_turn branch: if response lacks marker and not yet reprompted, append a user message
+  asking the agent to restate `FINAL ANSWER: <answer>` and continue the loop
+- If response still lacks marker after re-prompt: log `format_warning` trajectory event and accept
+
+Sub-slices (PR #58, open 2026-05-22):
+- FA-1 ✅: `_has_final_answer_marker` helper + 4 unit tests
+- FA-2 ✅: `_final_answer_reprompted` flag + re-prompt logic + `test_reprompts_once_when_marker_missing`
+- FA-3 ✅: `format_warning` fallback + `test_accepts_after_one_reprompt_with_format_warning`
+
+**Tests:** `TestFinalAnswerMarker` (4 tests) + `TestFinalAnswerReprompt` (2 tests) in `tests/test_agent_helpers.py`.
