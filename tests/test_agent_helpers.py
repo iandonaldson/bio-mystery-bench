@@ -11,6 +11,7 @@ from harness.agent import (
     _format_result,
     _get_blast_version,
     _handle_abort,
+    _has_final_answer_marker,
     _summarize_blast_output,
     ResourceEstimate,
     AgentResult,
@@ -922,7 +923,9 @@ class TestCriticMultiRound:
         from harness.config import RunConfig
 
         client = MagicMock()
-        client.chat.side_effect = [self._llm_response(f"answer{i}") for i in range(n_agent_responses)]
+        client.chat.side_effect = [
+            self._llm_response(f"FINAL ANSWER: answer{i}") for i in range(n_agent_responses)
+        ]
         critic_client = MagicMock()
         critic_client.chat.side_effect = [
             self._llm_response(f"critique{i}") for i in range(n_critic_responses)
@@ -1001,6 +1004,110 @@ class TestCriticMultiRound:
         assert len(critic_calls) == 1
         assert critic_calls[0].args[1]["round"] == 1
         assert critic_client.chat.call_count == 1
+
+
+class TestFinalAnswerMarker:
+    def test_marker_present_returns_true(self):
+        assert _has_final_answer_marker("Reasoning here. FINAL ANSWER: 42") is True
+
+    def test_marker_missing_returns_false(self):
+        assert _has_final_answer_marker("The answer is probably 42.") is False
+
+    def test_marker_with_only_whitespace_after_returns_false(self):
+        assert _has_final_answer_marker("FINAL ANSWER:   ") is False
+        assert _has_final_answer_marker("FINAL ANSWER:\n\n") is False
+
+    def test_marker_mid_text_returns_true(self):
+        text = "Some preamble.\nFINAL ANSWER: Bacillus licheniformis\nTrailing notes."
+        assert _has_final_answer_marker(text) is True
+
+
+class TestFinalAnswerReprompt:
+    def _llm_response(self, text):
+        from harness.llm import LLMResponse, LLMUsage
+        return LLMResponse(
+            stop_reason="end_turn",
+            text=text,
+            tool_calls=[],
+            usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+            raw_content=[{"type": "text", "text": text}],
+        )
+
+    def _run(self, agent_texts):
+        from harness.agent import AgentRun
+        from harness.config import RunConfig
+
+        client = MagicMock()
+        client.chat.side_effect = [self._llm_response(t) for t in agent_texts]
+        container = MagicMock()
+        container.exec_command.return_value = ("env", "", 0)
+        logger = MagicMock()
+        cost_tracker = MagicMock()
+
+        config = RunConfig()  # no critic
+        run = AgentRun(
+            client=client,
+            container=container,
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=logger,
+            cost_tracker=cost_tracker,
+        )
+        result = run.run()
+        return run, result, client, logger
+
+    def test_reprompts_once_when_marker_missing(self):
+        first_text = "I think the answer is 42 but I'm not stating it formally."
+        second_text = "FINAL ANSWER: 42"
+        run, result, client, logger = self._run([first_text, second_text])
+
+        # (a) two end_turn cycles consumed
+        assert client.chat.call_count == 2
+
+        # (b) one re-prompt user message in self.messages
+        reprompt_msgs = [
+            m for m in run.messages
+            if m.get("role") == "user"
+            and isinstance(m.get("content"), list)
+            and any(
+                isinstance(b, dict)
+                and b.get("type") == "text"
+                and "did not include a FINAL ANSWER" in b.get("text", "")
+                for b in m["content"]
+            )
+        ]
+        assert len(reprompt_msgs) == 1
+
+        # (c) result.final_message contains "FINAL ANSWER"
+        assert "FINAL ANSWER" in result.final_message
+        assert result.status == "success"
+
+    def test_accepts_after_one_reprompt_with_format_warning(self):
+        # Both responses lack the marker — after one re-prompt, accept and warn.
+        run, result, client, logger = self._run([
+            "Answer is probably 42, no formal marker.",
+            "Still no marker on this attempt either.",
+        ])
+        assert client.chat.call_count == 2
+
+        reprompt_msgs = [
+            m for m in run.messages
+            if m.get("role") == "user"
+            and isinstance(m.get("content"), list)
+            and any(
+                isinstance(b, dict)
+                and b.get("type") == "text"
+                and "did not include a FINAL ANSWER" in b.get("text", "")
+                for b in m["content"]
+            )
+        ]
+        assert len(reprompt_msgs) == 1
+
+        warning_calls = [c for c in logger.log.call_args_list if c.args[0] == "format_warning"]
+        assert len(warning_calls) == 1
+        assert "FINAL ANSWER marker missing" in warning_calls[0].args[1]["reason"]
+        assert result.status == "success"
 
 
 class TestRunEvalCriticFlags:
