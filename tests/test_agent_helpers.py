@@ -730,6 +730,102 @@ class TestCriticMultiRound:
         assert "verified-wrong" in CRITIC_FOLLOWUP_PROMPT
         assert "unverified-verbal-only" in CRITIC_FOLLOWUP_PROMPT
 
+    def _llm_response(self, text="answer text"):
+        from harness.llm import LLMResponse, LLMUsage
+        return LLMResponse(
+            stop_reason="end_turn",
+            text=text,
+            tool_calls=[],
+            usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+            raw_content=[{"type": "text", "text": text}],
+        )
+
+    def _run_with_mocks(self, critic_injection_points, max_critic_rounds,
+                        n_agent_responses, n_critic_responses):
+        from harness.agent import AgentRun
+        from harness.config import RunConfig
+
+        client = MagicMock()
+        client.chat.side_effect = [self._llm_response(f"answer{i}") for i in range(n_agent_responses)]
+        critic_client = MagicMock()
+        critic_client.chat.side_effect = [
+            self._llm_response(f"critique{i}") for i in range(n_critic_responses)
+        ]
+        container = MagicMock()
+        container.exec_command.return_value = ("env-snapshot", "", 0)
+        logger = MagicMock()
+        cost_tracker = MagicMock()
+
+        config = RunConfig(
+            critic_injection_points=list(critic_injection_points),
+            max_critic_rounds=max_critic_rounds,
+        )
+        run = AgentRun(
+            client=client,
+            container=container,
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=logger,
+            cost_tracker=cost_tracker,
+            critic_client=critic_client,
+        )
+        result = run.run()
+        return run, result, client, critic_client, logger
+
+    def test_runs_second_critic_when_after_critic_response_enabled(self):
+        _, result, client, critic_client, logger = self._run_with_mocks(
+            critic_injection_points=["after_final_answer", "after_critic_response"],
+            max_critic_rounds=2,
+            n_agent_responses=3,
+            n_critic_responses=2,
+        )
+        assert result.status == "success"
+        critic_calls = [c for c in logger.log.call_args_list if c.args[0] == "critic"]
+        assert len(critic_calls) == 2
+        assert critic_calls[0].args[1]["round"] == 1
+        assert critic_calls[1].args[1]["round"] == 2
+
+    def test_second_critic_uses_followup_prompt(self):
+        from harness.agent import CRITIC_FOLLOWUP_PROMPT, CRITIC_SYSTEM_PROMPT
+        _, _, _, critic_client, _ = self._run_with_mocks(
+            critic_injection_points=["after_final_answer", "after_critic_response"],
+            max_critic_rounds=2,
+            n_agent_responses=3,
+            n_critic_responses=2,
+        )
+        # First critic call uses CRITIC_SYSTEM_PROMPT; second uses CRITIC_FOLLOWUP_PROMPT.
+        first_kwargs = critic_client.chat.call_args_list[0].kwargs
+        second_kwargs = critic_client.chat.call_args_list[1].kwargs
+        assert first_kwargs["system"] == CRITIC_SYSTEM_PROMPT
+        assert second_kwargs["system"] == CRITIC_FOLLOWUP_PROMPT
+
+    def test_caps_at_max_critic_rounds(self):
+        # Even with both injection points enabled, exactly max_critic_rounds critic events fire.
+        run, result, _, critic_client, logger = self._run_with_mocks(
+            critic_injection_points=["after_final_answer", "after_critic_response"],
+            max_critic_rounds=2,
+            n_agent_responses=3,
+            n_critic_responses=2,
+        )
+        critic_calls = [c for c in logger.log.call_args_list if c.args[0] == "critic"]
+        assert len(critic_calls) == 2
+        assert critic_client.chat.call_count == 2
+        assert run._critic_rounds == 2
+
+    def test_skips_second_critic_when_not_in_injection_points(self):
+        _, result, _, critic_client, logger = self._run_with_mocks(
+            critic_injection_points=["after_final_answer"],
+            max_critic_rounds=2,
+            n_agent_responses=2,
+            n_critic_responses=1,
+        )
+        assert result.status == "success"
+        critic_calls = [c for c in logger.log.call_args_list if c.args[0] == "critic"]
+        assert len(critic_calls) == 1
+        assert critic_calls[0].args[1]["round"] == 1
+        assert critic_client.chat.call_count == 1
+
 
 class TestBlastToolDefinition:
     def test_name_is_blast_search(self):
