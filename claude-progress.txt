@@ -1,29 +1,30 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-22 — Agent B close-session: corrected CP-2/CP-3 sub-slice descriptions in
-`documents/features.md` (they were swapped), added BE-1..4 detail to match Agent C's BE
-description style, added L-21 (parallel-agent `__init__` field coordination) to
-`SKILLS/code-learnings/SKILL.md`, wrote `documents/code_walkthroughs/8.Agent_B_walkthrough.md`,
-added it (and Agent C's #7) to the README References section, generalised the close
-protocol into `SKILLS/session-close/SKILL.md`, and migrated the three previously
-single-file skills (`code_learnings.md`, `code_walkthrough.md`, `session_close.md`)
-to the standard `SKILLS/<name>/SKILL.md` directory format with YAML frontmatter,
-matching the convention used by `analyze-trajectories/`, `chipseq-tf-identification/`,
-and `deg-functional-enrichment/`.
+2026-05-22 — Agent A close-session: added the missing GM section (GM-1..6, PR #60) to
+`documents/features.md` with full sub-slice detail matching the CR2/FA/BE/CP style; added
+L-22 (Docker build-context tension between brief constraints and existing
+`ensure_docker_image()` invocation) and L-23 (multi-agent test-file conflict pattern at
+shared insertion sites) to `SKILLS/code-learnings/SKILL.md`; wrote
+`documents/code_walkthroughs/9.Agent_A_walkthrough.md`; added the new walkthrough to the
+README References section. Bumped `## Completed slices` and `## Test status` to reflect
+PR #60 (296/296 passing). Added the README/`ensure_docker_image()` build-context update
+to Next steps as priority 1 (latent bug — next image rebuild will fail).
 
-Earlier today: Agent C work merged. Qwen3 post-mortem remediations (CR2 PR #57, FA PR #58,
-BE PR #56, CP PR #59) all merged. Code learnings L-19/L-20 merged (PR #63). Agent C
-walkthrough merged (PR #64).
+Earlier today: Agent B close-session migrated SKILLs to the directory format and
+generalised the close protocol into `SKILLS/session-close/SKILL.md`. Agent C work merged.
+Qwen3 post-mortem remediations (CR2 PR #57, FA PR #58, BE PR #56, CP PR #59) all merged.
+Code learnings L-19/L-20 merged (PR #63). Agent C walkthrough merged (PR #64).
+GM (PR #60) merged as part of the same 2026-05-22 parallel-agent batch.
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
-providers. 291/291 tests passing. All prerequisite harness fixes (ENV-1–5, SC-1–4,
-SP-1/2, NR-1/2, RL-1–5, RBfix-1/2, B-1–3) merged, plus today's CR2/BE/FA/CP rounds.
+providers. 296/296 tests passing. All prerequisite harness fixes (ENV-1–5, SC-1–4,
+SP-1/2, NR-1/2, RL-1–5, RBfix-1/2, B-1–3) merged, plus today's CR2/BE/FA/CP/GM rounds.
 RERUN-1 to RERUN-4 complete: apples-to-apples comparison run done; results recorded
 below. Ready for a new Qwen3 trajectory rerun to measure whether the post-mortem fixes
-improve pass@1 on attempts that previously looped on empty BLAST or omitted FINAL
-ANSWER markers.
+improve pass@1 on attempts that previously looped on empty BLAST, omitted FINAL
+ANSWER markers, or attempted DEG/ChIP-seq interpretation without curated-DB lookup.
 
 ## Comparative Results (RERUN-2 / RERUN-3, 2026-05-19)
 
@@ -55,7 +56,7 @@ Earlier preview benchmark results (pre-fix harness, for reference):
 - llama-3.3-70b (Groq free tier): 20% pass@1 (1/5 — rest hit 100k token/day limit)
 
 ## Active feature slice
-None — Qwen3 post-mortem remediations (CR2, BE, FA, CP) all merged 2026-05-22.
+None — Qwen3 post-mortem remediations (CR2, BE, FA, CP, GM) all merged 2026-05-22.
 
 ## Documentation
 - documents/code_walkthroughs/code_flow.md — end-to-end harness walkthrough (single Anthropic provider)
@@ -63,6 +64,7 @@ None — Qwen3 post-mortem remediations (CR2, BE, FA, CP) all merged 2026-05-22.
 - documents/code_walkthroughs/3.Accommodating_OpenAI_models.md — critic, prompt rules, scorer pipeline
 - documents/code_walkthroughs/7.Agent_C_walkthrough.md — CR2 (second critic exchange) + FA (FINAL ANSWER marker)
 - documents/code_walkthroughs/8.Agent_B_walkthrough.md — BE (empty-BLAST disambiguation) + CP (critic alternatives)
+- documents/code_walkthroughs/9.Agent_A_walkthrough.md — GM (DEG enrichment / ChIP-seq motif system-prompt advice + in-container reference SKILLs)
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
@@ -120,6 +122,15 @@ None — Qwen3 post-mortem remediations (CR2, BE, FA, CP) all merged 2026-05-22.
   label outcome as (A) wrong-on-evidence or (B) unverified, and `_format_critic_injection`
   asks agent to test the strongest-evidence alternative
 - Fix missing `_final_answer_reprompted` initialiser introduced by FA (folded into PR #59)
+- GM: general method advice + reference SKILLs — GM-1..6 (PR #60)
+  Adds DEG enrichment (ORA/GSEA/GSVA) and ChIP-seq TF motif-DB advice to
+  `prompts/system.txt`; new `SKILLS/deg-functional-enrichment/SKILL.md` (3 recipes via
+  `gseapy`) and `SKILLS/chipseq-tf-identification/SKILL.md` (2 recipes via `pyjaspar` +
+  `Bio.motifs` / JASPAR REST API); both baked into `/workspace/skills/` via
+  `docker/Dockerfile`; smoke test extended; libraries install on demand (`pip install
+  gseapy pyjaspar`) — not baked into the image
+- Agent A close-session: added GM section to features.md, added L-22/L-23 to learnings,
+  wrote walkthrough #9 (this session)
 
 ## Pending slices
 - Curated bioinformatics tools (structured wrappers for DESeq2, STAR, featureCounts)
@@ -134,30 +145,45 @@ None — Qwen3 post-mortem remediations (CR2, BE, FA, CP) all merged 2026-05-22.
 - Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md
 
 ## Test status
-291/291 passing on origin/main after PR #59. Includes:
+296/296 passing on origin/main after PR #60. Includes:
 - 9 new tests in TestBlastVersionAndSummary (BE-1..4)
 - 3 new tests in TestCriticPromptAlternatives (CP-1..3)
+- 3 new tests in TestSystemPromptMethodAdvice (GM-1, GM-2, GM-6)
+- 2 new tests in TestSkillFiles (GM-3, GM-4)
 - CR2 and FA test classes added by sibling agents
 
 ## Next steps (in priority order)
-1. README update — `--max-critic-rounds` and `after_critic_response` injection point are still
-   missing from the CLI options table in `README.md`. Walkthroughs #7 and #8 are now linked
-   in the References section (close-agent-b session) but the CLI options table itself was
-   left untouched because this session did not own the CR2 CLI work. A small follow-up PR
-   should add those flags to the table.
-2. Benchmark rerun — re-run the 5-problem preview comparison with the new flags:
+1. Docker build context update (latent bug from PR #60) — `scripts/run_eval.py:ensure_docker_image()`
+   (line ~115) still passes `dockerfile_dir` (= `docker/`) as the build context, and
+   `README.md` quick-start documents the same. PR #60 added `COPY SKILLS/...` directives that
+   require **repo root** as the build context — the next time `docker image inspect` fails
+   (cache cleared, image deleted, new VM) the auto-rebuild will fail with
+   "SKILLS/deg-functional-enrichment/SKILL.md: not found". Fix: change the subprocess call to
+   `["docker", "build", "-t", image_name, "-f", str(dockerfile_dir / "Dockerfile"),
+   str(dockerfile_dir.parent)]`, and update the README quick-start to
+   `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .` from repo root.
+   The currently cached image keeps live runs working until then. See L-22 for the
+   reasoning behind why this gap was unavoidable inside the GM brief's file-list constraint.
+2. README update — `--max-critic-rounds` and `after_critic_response` injection point are still
+   missing from the CLI options table in `README.md`. Walkthroughs #7, #8, and #9 are now
+   linked in the References section but the CLI options table itself was left untouched
+   because this session did not own the CR2 CLI work. A small follow-up PR should add
+   those flags to the table.
+3. Benchmark rerun — re-run the 5-problem preview comparison with the new flags:
    `--critic-injection-points after_final_answer --critic-injection-points after_critic_response --max-critic-rounds 2`
-   This directly measures whether CR2 + FA + BE + CP raise Qwen3 pass@1 above 0% on the
+   This directly measures whether CR2 + FA + BE + CP + GM raise Qwen3 pass@1 above 0% on the
    human-solvable subset (hb020, hb002, recqgsfxqqodhjens). Compare against the 2026-05-19
    baseline using `scripts/compare_runs.py`; record the new numbers in this file and in
-   `documents/features.md` under "Comparative Results".
-3. CI guard against missing initialisers — add a test or AST-based linter rule that diffs the
+   `documents/features.md` under "Comparative Results". The hb053 (heat stress) and hb022
+   (pancreatic samples) cases are particularly worth re-checking now that GM advises against
+   sequence-composition-based inference.
+4. CI guard against missing initialisers — add a test or AST-based linter rule that diffs the
    set of `self.X` references inside `AgentRun._loop` against the set of `self.X = ...`
    assignments in `AgentRun.__init__`. The motivating incident is captured in L-21 — FA's
    `_final_answer_reprompted` reference shipped without an initialiser, breaking 4 tests on
    `main` until PR #59 folded in the one-line fix. A unit test along the lines of
    `test_agent_run_init_covers_all_loop_self_attrs` would catch the next instance at PR time.
-4. Curated bioinformatics tool wrappers (still pending; not started). Structured wrappers
+5. Curated bioinformatics tool wrappers (still pending; not started). Structured wrappers
    for DESeq2, STAR, featureCounts to reduce stdout volume. Decompose per tool, one sub-slice
    each — see L-05 (elephant carpaccio rule).
 
@@ -174,8 +200,16 @@ None — Qwen3 post-mortem remediations (CR2, BE, FA, CP) all merged 2026-05-22.
   alongside after_final_answer; use --max-critic-rounds N to cap (default 2)
 - Judge model defaults: claude-haiku-4-5-20251001 (Anthropic runs), same as agent model (others)
 - Preflight ping: validates all model endpoints before Docker starts — fail fast on bad model names
-- All fixes in PRs #1–#59 merged to main
-- Docker image: bio-mystery-bench:latest (~4GB, cached locally)
+- All fixes in PRs #1–#60 merged to main
+- Docker image: bio-mystery-bench:latest (~4GB, cached locally). Build with
+  `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .` from repo root —
+  PR #60 added `COPY SKILLS/...` directives that need repo-root context. README and
+  `ensure_docker_image()` still document the old `docker/`-as-context invocation
+  (Next steps item 1)
+- Bio method recipes available in-container at /workspace/skills/ (PR #60): the agent
+  can `cat /workspace/skills/deg-functional-enrichment.md` or
+  `cat /workspace/skills/chipseq-tf-identification.md` to get copy-pasteable analysis
+  recipes. Libraries (`gseapy`, `pyjaspar`) install on demand via `pip install`
 - Parallel-agent workflow note: when multiple agents touch AgentRun.__init__ in
   parallel branches, run the full suite after each merge — PR #58 referenced
   `_final_answer_reprompted` without initialising it, which broke 4 tests until
