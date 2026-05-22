@@ -642,11 +642,28 @@ def _get_blast_version(container: Container, program: str) -> str:
     return first_line
 
 
-def _summarize_blast_output(stdout: str, max_hits: int = 10) -> str:
-    """Parse BLAST tabular output (outfmt 6) into a compact summary table."""
+def _summarize_blast_output(
+    stdout: str,
+    max_hits: int = 10,
+    program: str = "blastn",
+    version: str = "",
+) -> str:
+    """Parse BLAST tabular output (outfmt 6) into a compact summary table.
+
+    When there are no hits, the summary explicitly confirms the program is
+    installed (citing `version` if provided) so the agent does not mistake an
+    empty result for a missing binary (see L-12).
+    """
     lines = [l for l in stdout.strip().splitlines() if l and not l.startswith("#")]
     if not lines:
-        return "No BLAST hits found."
+        installed_clause = f" {program} installed (version {version})." if version else ""
+        return (
+            f"No hits at default parameters.{installed_clause} "
+            "Anonymised sequences may not match nt/nr. "
+            "Consider: (a) -evalue 1, (b) shorter query, "
+            "(c) -task blastn-short for very short queries, "
+            "(d) different program (blastn↔blastx)."
+        )
     header = f"{'Hit ID':<45} {'Identity':>8} {'E-value':>12} {'Bitscore':>9}"
     sep = "-" * 76
     rows = [header, sep]

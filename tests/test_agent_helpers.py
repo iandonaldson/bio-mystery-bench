@@ -648,14 +648,20 @@ def _blast_row(sseqid="NM_001234.1", pident="98.50", evalue="1e-120", bitscore="
 
 class TestSummarizeBlastOutput:
     def test_empty_string_returns_no_hits(self):
-        assert _summarize_blast_output("") == "No BLAST hits found."
+        result = _summarize_blast_output("")
+        assert "No hits at default parameters." in result
+        assert "Consider:" in result
 
     def test_whitespace_only_returns_no_hits(self):
-        assert _summarize_blast_output("   \n  ") == "No BLAST hits found."
+        result = _summarize_blast_output("   \n  ")
+        assert "No hits at default parameters." in result
+        assert "Consider:" in result
 
     def test_comment_only_lines_return_no_hits(self):
         inp = "# BLASTN 2.14.0\n# Fields: query id, subject id, ...\n"
-        assert _summarize_blast_output(inp) == "No BLAST hits found."
+        result = _summarize_blast_output(inp)
+        assert "No hits at default parameters." in result
+        assert "Consider:" in result
 
     def test_three_valid_rows_produce_header_and_three_data_lines(self):
         rows = "\n".join([_blast_row("Hit_A"), _blast_row("Hit_B"), _blast_row("Hit_C")])
@@ -723,6 +729,33 @@ class TestBlastVersionAndSummary:
             cost_tracker=MagicMock(),
         )
         assert run._blast_versions == {}
+
+    def test_summarize_blast_empty_includes_version_when_provided(self):
+        result = _summarize_blast_output("", program="blastn", version="blastn: 2.13.0+")
+        assert "blastn installed (version blastn: 2.13.0+)" in result
+        assert "No hits at default parameters." in result
+        assert "Consider:" in result
+
+    def test_summarize_blast_empty_omits_version_when_blank(self):
+        result = _summarize_blast_output("", program="blastn", version="")
+        assert "installed (version" not in result
+        assert "No hits at default parameters." in result
+
+    def test_summarize_blast_non_empty_unchanged(self):
+        rows = "\n".join([
+            "q1\tHit_A\t99.0\t200\t3\t0\t1\t200\t10\t209\t1e-100\t400",
+            "q1\tHit_B\t98.5\t200\t3\t0\t1\t200\t10\t209\t2e-99\t395",
+            "q1\tHit_C\t97.0\t200\t3\t0\t1\t200\t10\t209\t3e-95\t380",
+        ])
+        result = _summarize_blast_output(rows, max_hits=10, program="blastn", version="blastn: 2.13.0+")
+        lines = result.splitlines()
+        assert lines[0].startswith("Hit ID")
+        assert lines[1].startswith("-")
+        assert "Hit_A" in result
+        assert "Hit_B" in result
+        assert "Hit_C" in result
+        assert "Consider:" not in result
+        assert "installed (version" not in result
 
 
 # ---------------------------------------------------------------------------
