@@ -133,7 +133,15 @@ was made. Do not flag assumptions that were explicitly tested.
 Focus on the 2-3 most consequential unverified assumptions.
 
 At the end, state whether any HIGH-risk assumption would plausibly change the
-final answer if it turned out to be wrong.\
+final answer if it turned out to be wrong.
+
+For any HIGH-risk flag, list 1–2 alternative answers consistent with the
+trajectory's evidence. Cite the specific trajectory step that supports each
+alternative. Do not invent claims the agent did not make.
+
+Distinguish two outcomes — (A) Agent answer appears wrong on the evidence
+(list alternatives); (B) Agent answer may be correct but unverified (state
+which assumption to verify).\
 """
 
 CRITIC_FOLLOWUP_PROMPT = """\
@@ -211,6 +219,7 @@ class AgentRun:
         self.cache_read_tokens = 0
         self._critic_rounds: int = 0
         self._blast_versions: dict[str, str] = {}
+        self._final_answer_reprompted: bool = False
 
     def run(self) -> AgentResult:
         start = time.monotonic()
@@ -610,6 +619,8 @@ def _format_critic_injection(critique: str) -> str:
         "- If you agree with a concern, use bash to verify the assumption, then state "
         "your revised FINAL ANSWER.\n"
         "- If you disagree, briefly explain why and restate your original FINAL ANSWER.\n"
+        "- If the critic listed alternatives, test the one with the strongest evidence "
+        "support before restating your answer.\n"
         "You must end with: FINAL ANSWER: <answer>"
     )
 

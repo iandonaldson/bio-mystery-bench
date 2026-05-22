@@ -1185,3 +1185,25 @@ class TestBlastToolDefinition:
     def test_extra_args_property_present(self):
         props = BLAST_TOOL["input_schema"]["properties"]
         assert "extra_args" in props
+
+
+# ---------------------------------------------------------------------------
+# Critic prompt: require concrete alternatives (CP-1..3)
+# ---------------------------------------------------------------------------
+
+from harness.agent import CRITIC_SYSTEM_PROMPT, _format_critic_injection
+
+
+class TestCriticPromptAlternatives:
+    def test_critic_system_prompt_requires_alternatives_with_evidence(self):
+        assert "1–2 alternative answers" in CRITIC_SYSTEM_PROMPT
+        assert "Cite the specific trajectory step" in CRITIC_SYSTEM_PROMPT
+
+    def test_critic_system_prompt_distinguishes_wrong_vs_unverified(self):
+        assert "Agent answer appears wrong on the evidence" in CRITIC_SYSTEM_PROMPT
+        assert "may be correct but unverified" in CRITIC_SYSTEM_PROMPT
+        assert "which assumption to verify" in CRITIC_SYSTEM_PROMPT
+
+    def test_critic_injection_wrapper_mentions_alternatives_testing(self):
+        result = _format_critic_injection("dummy")
+        assert "test the one with the strongest evidence support" in result
