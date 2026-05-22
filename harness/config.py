@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 # Valid injection point identifiers. More can be added here as the harness evolves.
-CRITIC_INJECTION_POINTS = ("after_final_answer",)
+CRITIC_INJECTION_POINTS = ("after_final_answer", "after_critic_response")
 
 
 @dataclass
@@ -29,3 +29,4 @@ class RunConfig:
     # Critic agent — list of injection point names (empty = disabled)
     critic_injection_points: list = field(default_factory=list)
     critic_model: str = ""  # empty = use same model as agent
+    max_critic_rounds: int = 2

@@ -694,6 +694,190 @@ class TestSummarizeBlastOutput:
 # BLAST_TOOL definition  (B-2)
 # ---------------------------------------------------------------------------
 
+class TestCriticMultiRound:
+    def _make_run(self, critic_injection_points=None, **config_kwargs):
+        from harness.agent import AgentRun
+        from harness.config import RunConfig
+        config = RunConfig(
+            critic_injection_points=list(critic_injection_points or []),
+            **config_kwargs,
+        )
+        return AgentRun(
+            client=MagicMock(),
+            container=MagicMock(),
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+
+    def test_critic_rounds_initialised_zero(self):
+        run = self._make_run()
+        assert run._critic_rounds == 0
+
+    def test_config_critic_injection_points_includes_after_critic_response(self):
+        from harness.config import CRITIC_INJECTION_POINTS
+        assert "after_critic_response" in CRITIC_INJECTION_POINTS
+
+    def test_config_max_critic_rounds_default_two(self):
+        from harness.config import RunConfig
+        assert RunConfig().max_critic_rounds == 2
+
+    def test_critic_followup_prompt_exists_and_mentions_verification(self):
+        from harness.agent import CRITIC_FOLLOWUP_PROMPT
+        assert "verified" in CRITIC_FOLLOWUP_PROMPT
+        assert "verified-wrong" in CRITIC_FOLLOWUP_PROMPT
+        assert "unverified-verbal-only" in CRITIC_FOLLOWUP_PROMPT
+
+    def _llm_response(self, text="answer text"):
+        from harness.llm import LLMResponse, LLMUsage
+        return LLMResponse(
+            stop_reason="end_turn",
+            text=text,
+            tool_calls=[],
+            usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+            raw_content=[{"type": "text", "text": text}],
+        )
+
+    def _run_with_mocks(self, critic_injection_points, max_critic_rounds,
+                        n_agent_responses, n_critic_responses):
+        from harness.agent import AgentRun
+        from harness.config import RunConfig
+
+        client = MagicMock()
+        client.chat.side_effect = [self._llm_response(f"answer{i}") for i in range(n_agent_responses)]
+        critic_client = MagicMock()
+        critic_client.chat.side_effect = [
+            self._llm_response(f"critique{i}") for i in range(n_critic_responses)
+        ]
+        container = MagicMock()
+        container.exec_command.return_value = ("env-snapshot", "", 0)
+        logger = MagicMock()
+        cost_tracker = MagicMock()
+
+        config = RunConfig(
+            critic_injection_points=list(critic_injection_points),
+            max_critic_rounds=max_critic_rounds,
+        )
+        run = AgentRun(
+            client=client,
+            container=container,
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=logger,
+            cost_tracker=cost_tracker,
+            critic_client=critic_client,
+        )
+        result = run.run()
+        return run, result, client, critic_client, logger
+
+    def test_runs_second_critic_when_after_critic_response_enabled(self):
+        _, result, client, critic_client, logger = self._run_with_mocks(
+            critic_injection_points=["after_final_answer", "after_critic_response"],
+            max_critic_rounds=2,
+            n_agent_responses=3,
+            n_critic_responses=2,
+        )
+        assert result.status == "success"
+        critic_calls = [c for c in logger.log.call_args_list if c.args[0] == "critic"]
+        assert len(critic_calls) == 2
+        assert critic_calls[0].args[1]["round"] == 1
+        assert critic_calls[1].args[1]["round"] == 2
+
+    def test_second_critic_uses_followup_prompt(self):
+        from harness.agent import CRITIC_FOLLOWUP_PROMPT, CRITIC_SYSTEM_PROMPT
+        _, _, _, critic_client, _ = self._run_with_mocks(
+            critic_injection_points=["after_final_answer", "after_critic_response"],
+            max_critic_rounds=2,
+            n_agent_responses=3,
+            n_critic_responses=2,
+        )
+        # First critic call uses CRITIC_SYSTEM_PROMPT; second uses CRITIC_FOLLOWUP_PROMPT.
+        first_kwargs = critic_client.chat.call_args_list[0].kwargs
+        second_kwargs = critic_client.chat.call_args_list[1].kwargs
+        assert first_kwargs["system"] == CRITIC_SYSTEM_PROMPT
+        assert second_kwargs["system"] == CRITIC_FOLLOWUP_PROMPT
+
+    def test_caps_at_max_critic_rounds(self):
+        # Even with both injection points enabled, exactly max_critic_rounds critic events fire.
+        run, result, _, critic_client, logger = self._run_with_mocks(
+            critic_injection_points=["after_final_answer", "after_critic_response"],
+            max_critic_rounds=2,
+            n_agent_responses=3,
+            n_critic_responses=2,
+        )
+        critic_calls = [c for c in logger.log.call_args_list if c.args[0] == "critic"]
+        assert len(critic_calls) == 2
+        assert critic_client.chat.call_count == 2
+        assert run._critic_rounds == 2
+
+    def test_skips_second_critic_when_not_in_injection_points(self):
+        _, result, _, critic_client, logger = self._run_with_mocks(
+            critic_injection_points=["after_final_answer"],
+            max_critic_rounds=2,
+            n_agent_responses=2,
+            n_critic_responses=1,
+        )
+        assert result.status == "success"
+        critic_calls = [c for c in logger.log.call_args_list if c.args[0] == "critic"]
+        assert len(critic_calls) == 1
+        assert critic_calls[0].args[1]["round"] == 1
+        assert critic_client.chat.call_count == 1
+
+
+class TestRunEvalCriticFlags:
+    """CLI wiring for the second critic flags (CR2-5)."""
+
+    def _invoke(self, args):
+        """Invoke scripts/run_eval main, intercepting RunConfig to capture kwargs.
+
+        load_problems is patched to return [], so the CLI exits with code 1
+        after the config is constructed — that's exactly the seam we want.
+        """
+        from click.testing import CliRunner
+        from unittest.mock import patch
+        import sys
+        from pathlib import Path
+
+        scripts_path = str(Path(__file__).resolve().parent.parent / "scripts")
+        if scripts_path not in sys.path:
+            sys.path.insert(0, scripts_path)
+
+        from scripts.run_eval import main
+        from harness.config import RunConfig
+
+        captured = {}
+
+        def capture(*ca, **ck):
+            captured.update(ck)
+            return RunConfig(*ca, **ck)
+
+        runner = CliRunner()
+        with patch("scripts.run_eval.RunConfig", side_effect=capture):
+            with patch("scripts.run_eval.load_problems", return_value=[]):
+                result = runner.invoke(main, args, catch_exceptions=False)
+        return captured, result
+
+    def test_run_eval_parses_max_critic_rounds_flag(self):
+        captured, _ = self._invoke(["--max-critic-rounds", "3"])
+        assert captured.get("max_critic_rounds") == 3
+
+    def test_run_eval_max_critic_rounds_default_two(self):
+        captured, _ = self._invoke([])
+        assert captured.get("max_critic_rounds") == 2
+
+    def test_run_eval_accepts_after_critic_response(self):
+        captured, _ = self._invoke([
+            "--critic-injection-points", "after_final_answer",
+            "--critic-injection-points", "after_critic_response",
+        ])
+        cp = captured.get("critic_injection_points")
+        assert "after_final_answer" in cp
+        assert "after_critic_response" in cp
+
+
 class TestBlastToolDefinition:
     def test_name_is_blast_search(self):
         assert BLAST_TOOL["name"] == "blast_search"

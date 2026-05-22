@@ -136,6 +136,22 @@ At the end, state whether any HIGH-risk assumption would plausibly change the
 final answer if it turned out to be wrong.\
 """
 
+CRITIC_FOLLOWUP_PROMPT = """\
+You previously audited this agent's reasoning. The agent has now responded.
+Review the new tool calls and reasoning since your last critique.
+
+For each HIGH-risk assumption you flagged: (a) did the agent empirically test
+it via a tool call? Mark each as one of:
+- verified           — the agent ran a tool call that confirmed the assumption
+- verified-wrong     — the agent ran a tool call that contradicted the assumption
+- unverified-verbal-only — the agent only re-stated or argued, without testing
+
+If any HIGH-risk assumption remains unverified-verbal-only, list 1-2 alternative
+answers that would also be consistent with the evidence collected so far.
+
+Conclude with a one-line verdict: 'concerns resolved' or 'concerns remain'.\
+"""
+
 # Commands run before the agent starts — logged and injected as environment context
 RESOURCE_CHECK_CMD = """\
 echo "=== CPU ===" && nproc && \
@@ -193,7 +209,7 @@ class AgentRun:
         self.input_tokens = 0
         self.output_tokens = 0
         self.cache_read_tokens = 0
-        self._critic_injected = False
+        self._critic_rounds: int = 0
 
     def run(self) -> AgentResult:
         start = time.monotonic()
@@ -277,17 +293,29 @@ class AgentRun:
             self.steps += 1
 
             if response.stop_reason == "end_turn":
-                # Critic injection point: after_final_answer
-                if (
-                    "after_final_answer" in self.config.critic_injection_points
-                    and not self._critic_injected
-                ):
-                    self._critic_injected = True
-                    critique = self._run_critic(response.text)
+                # Critic injection points: after_final_answer (round 1) and
+                # after_critic_response (round 2+). Capped at max_critic_rounds.
+                cp = self.config.critic_injection_points
+                fire_critic = (
+                    self._critic_rounds < self.config.max_critic_rounds
+                    and (
+                        ("after_final_answer" in cp and self._critic_rounds == 0)
+                        or ("after_critic_response" in cp and self._critic_rounds >= 1)
+                    )
+                )
+                if fire_critic:
+                    system_prompt = (
+                        CRITIC_FOLLOWUP_PROMPT
+                        if self._critic_rounds >= 1
+                        else CRITIC_SYSTEM_PROMPT
+                    )
+                    self._critic_rounds += 1
+                    critique = self._run_critic(response.text, system_prompt=system_prompt)
                     if critique:
                         self.logger.log("critic", {
                             "model": self.config.critic_model or self.config.model,
                             "critique": critique,
+                            "round": self._critic_rounds,
                         })
                         self.messages.append({
                             "role": "user",
@@ -407,14 +435,14 @@ class AgentRun:
 
         return self._result("error", start)  # unreachable
 
-    def _run_critic(self, final_answer: str) -> str:
+    def _run_critic(self, final_answer: str, system_prompt: str = CRITIC_SYSTEM_PROMPT) -> str:
         """Call the critic model on the current trajectory. Returns critique text, or '' on error."""
         trajectory_text = self._format_trajectory_for_critic(final_answer)
         critic_model = self.config.critic_model or self.config.model
         try:
             response = self.critic_client.chat(
                 model=critic_model,
-                system=CRITIC_SYSTEM_PROMPT,
+                system=system_prompt,
                 messages=[{
                     "role": "user",
                     "content": f"Please audit the following agent trajectory:\n\n{trajectory_text}",
