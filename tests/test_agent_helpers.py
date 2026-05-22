@@ -751,3 +751,42 @@ class TestSystemPromptMethodAdvice:
         assert "pyjaspar" in text or "Bio.motifs" in text
         # Pointer to the reference SKILL.
         assert "/workspace/skills/chipseq-tf-identification.md" in text
+
+
+# ---------------------------------------------------------------------------
+# Reference SKILL files  (GM-3, GM-4)
+# ---------------------------------------------------------------------------
+
+import re
+import yaml
+
+SKILLS_ROOT = Path(__file__).resolve().parent.parent / "SKILLS"
+
+
+def _parse_skill_frontmatter(path: Path) -> tuple[dict, str]:
+    """Split a SKILL.md into (frontmatter_dict, body_string)."""
+    text = path.read_text()
+    m = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.DOTALL)
+    assert m, f"{path} is missing a YAML --- frontmatter block"
+    fm = yaml.safe_load(m.group(1))
+    body = m.group(2)
+    return fm, body
+
+
+class TestSkillFiles:
+    def test_skill_file_deg_enrichment_has_frontmatter_and_three_recipes(self):
+        path = SKILLS_ROOT / "deg-functional-enrichment" / "SKILL.md"
+        fm, body = _parse_skill_frontmatter(path)
+        assert fm["name"] == "deg-functional-enrichment"
+        assert "description" in fm and fm["description"].strip()
+        # Three recipes — each must have its own H2 heading containing "Recipe N".
+        recipe_headings = re.findall(r"^##\s+Recipe\s+\d+", body, re.MULTILINE)
+        assert len(recipe_headings) == 3, (
+            f"expected 3 '## Recipe N' headings, got {recipe_headings}"
+        )
+        # The three methods must each appear in the body.
+        assert "gseapy.enrichr" in body or "gp.enrichr" in body
+        assert "gseapy.prerank" in body or "gp.prerank" in body
+        assert "gseapy.ssgsea" in body or "gp.ssgsea" in body
+        # Install-on-demand note must be present (no pre-install in Docker).
+        assert "pip install gseapy" in body
