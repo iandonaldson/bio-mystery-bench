@@ -137,7 +137,11 @@ final answer if it turned out to be wrong.
 
 For any HIGH-risk flag, list 1–2 alternative answers consistent with the
 trajectory's evidence. Cite the specific trajectory step that supports each
-alternative. Do not invent claims the agent did not make.\
+alternative. Do not invent claims the agent did not make.
+
+Distinguish two outcomes — (A) Agent answer appears wrong on the evidence
+(list alternatives); (B) Agent answer may be correct but unverified (state
+which assumption to verify).\
 """
 
 CRITIC_FOLLOWUP_PROMPT = """\

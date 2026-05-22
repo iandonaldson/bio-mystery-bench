@@ -1198,3 +1198,8 @@ class TestCriticPromptAlternatives:
     def test_critic_system_prompt_requires_alternatives_with_evidence(self):
         assert "1–2 alternative answers" in CRITIC_SYSTEM_PROMPT
         assert "Cite the specific trajectory step" in CRITIC_SYSTEM_PROMPT
+
+    def test_critic_system_prompt_distinguishes_wrong_vs_unverified(self):
+        assert "Agent answer appears wrong on the evidence" in CRITIC_SYSTEM_PROMPT
+        assert "may be correct but unverified" in CRITIC_SYSTEM_PROMPT
+        assert "which assumption to verify" in CRITIC_SYSTEM_PROMPT
