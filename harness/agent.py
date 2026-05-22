@@ -210,6 +210,7 @@ class AgentRun:
         self.output_tokens = 0
         self.cache_read_tokens = 0
         self._critic_rounds: int = 0
+        self._blast_versions: dict[str, str] = {}
 
     def run(self) -> AgentResult:
         start = time.monotonic()

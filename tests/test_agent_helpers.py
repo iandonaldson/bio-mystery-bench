@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from harness.agent import (
+    AgentRun,
     _extract_text,
     _format_result,
     _get_blast_version,
@@ -710,6 +711,18 @@ class TestBlastVersionAndSummary:
         container = MagicMock()
         container.exec_command.side_effect = TimeoutError("timed out")
         assert _get_blast_version(container, "blastn") == ""
+
+    def test_blast_versions_cache_initialised_empty(self):
+        run = AgentRun(
+            client=MagicMock(),
+            container=MagicMock(),
+            problem_question="q",
+            system_prompt="s",
+            config=MagicMock(),
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+        assert run._blast_versions == {}
 
 
 # ---------------------------------------------------------------------------
