@@ -409,7 +409,16 @@ class AgentRun:
                         except Exception as e:
                             stdout, stderr, rc = "", str(e), -1
 
-                        summary = _summarize_blast_output(stdout, max_hits)
+                        if program not in self._blast_versions:
+                            self._blast_versions[program] = _get_blast_version(
+                                self.container, program
+                            )
+                        summary = _summarize_blast_output(
+                            stdout,
+                            max_hits,
+                            program=program,
+                            version=self._blast_versions[program],
+                        )
                         result_text = (
                             f"BLAST Summary ({program} vs {database}):\n{summary}\n\n"
                             f"Full results saved to {out_file}"

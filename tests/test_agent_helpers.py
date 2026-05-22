@@ -757,6 +757,114 @@ class TestBlastVersionAndSummary:
         assert "Consider:" not in result
         assert "installed (version" not in result
 
+    # ---- Integration: BLAST dispatch wires the cache into the summary ----
+
+    def _make_blast_tool_call(self, call_id, program="blastn"):
+        from harness.llm import LLMToolCall
+        return LLMToolCall(
+            id=call_id,
+            name="blast_search",
+            input={
+                "query": "/workspace/scratch/q.fasta",
+                "database": "nt",
+                "program": program,
+                "max_hits": 5,
+            },
+        )
+
+    def _make_run_with_scripted_responses(self, responses, exec_side_effect):
+        from harness.llm import LLMResponse, LLMUsage
+        from harness.config import RunConfig
+
+        client = MagicMock()
+        client.chat.side_effect = [
+            LLMResponse(
+                stop_reason=r["stop_reason"],
+                text=r.get("text", ""),
+                tool_calls=r.get("tool_calls", []),
+                usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+                raw_content=r.get("raw_content", []),
+            )
+            for r in responses
+        ]
+
+        container = MagicMock()
+        container.exec_command.side_effect = exec_side_effect
+
+        config = RunConfig(max_steps=10, step_timeout_seconds=30, run_timeout_seconds=60)
+
+        run = AgentRun(
+            client=client,
+            container=container,
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+        return run, container
+
+    def test_blast_search_caches_version_per_program(self):
+        version_calls = []
+        blast_calls = []
+
+        def exec_side_effect(command, timeout=300):
+            if "-version" in command:
+                version_calls.append(command)
+                return ("blastn: 2.13.0+\n", "", 0)
+            if "-db" in command:
+                blast_calls.append(command)
+                return ("", "", 0)
+            return ("snapshot", "", 0)  # RESOURCE_CHECK_CMD
+
+        tc1 = self._make_blast_tool_call("tu_1")
+        tc2 = self._make_blast_tool_call("tu_2")
+        responses = [
+            {"stop_reason": "tool_use", "tool_calls": [tc1],
+             "raw_content": [{"type": "tool_use", "id": "tu_1", "name": "blast_search",
+                              "input": tc1.input}]},
+            {"stop_reason": "tool_use", "tool_calls": [tc2],
+             "raw_content": [{"type": "tool_use", "id": "tu_2", "name": "blast_search",
+                              "input": tc2.input}]},
+            {"stop_reason": "end_turn", "text": "done", "raw_content": []},
+        ]
+        run, _container = self._make_run_with_scripted_responses(responses, exec_side_effect)
+        run.run()
+        assert len(blast_calls) == 2
+        assert len(version_calls) == 1
+        assert run._blast_versions["blastn"] == "blastn: 2.13.0+"
+
+    def test_blast_search_empty_summary_includes_version_string(self):
+        def exec_side_effect(command, timeout=300):
+            if "-version" in command:
+                return ("blastn: 2.13.0+\n", "", 0)
+            if "-db" in command:
+                return ("", "", 0)  # empty BLAST result
+            return ("snapshot", "", 0)
+
+        tc = self._make_blast_tool_call("tu_x")
+        responses = [
+            {"stop_reason": "tool_use", "tool_calls": [tc],
+             "raw_content": [{"type": "tool_use", "id": "tu_x", "name": "blast_search",
+                              "input": tc.input}]},
+            {"stop_reason": "end_turn", "text": "done", "raw_content": []},
+        ]
+        run, _container = self._make_run_with_scripted_responses(responses, exec_side_effect)
+        run.run()
+
+        # The summary is appended to the second user message as a tool_result.
+        tool_result_msg = run.messages[-2]  # last assistant is end_turn; before that is tool_result
+        # Walk the messages to find the tool_result content
+        summary_text = ""
+        for msg in run.messages:
+            if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+                for block in msg["content"]:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        summary_text += str(block.get("content", ""))
+        assert "blastn" in summary_text
+        assert "Consider:" in summary_text
+        assert "blastn: 2.13.0+" in summary_text
+
 
 # ---------------------------------------------------------------------------
 # BLAST_TOOL definition  (B-2)
