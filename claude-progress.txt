@@ -4,13 +4,12 @@
 2026-05-22 — Implemented Qwen3 trajectory post-mortem remediations. CR2-1..5: second
 critic exchange (_critic_rounds counter, CRITIC_FOLLOWUP_PROMPT, after_critic_response
 injection point, max_critic_rounds CLI flag) — PR #57, merged. FA-1..3: FINAL ANSWER
-marker enforcement with one re-prompt + format_warning fallback — PR #58, open.
+marker enforcement with one re-prompt + format_warning fallback — PR #58, merged.
 17 new unit tests; 279 total passing.
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
-providers. 279/279 tests passing. CR2 (second critic exchange) merged to main.
-FA (FINAL ANSWER marker enforcement) PR open — awaiting merge.
+providers. 279/279 tests passing. CR2 and FA both merged to main.
 
 ## Comparative Results (RERUN-2 / RERUN-3, 2026-05-19)
 
@@ -42,13 +41,13 @@ Earlier preview benchmark results (pre-fix harness, for reference):
 - llama-3.3-70b (Groq free tier): 20% pass@1 (1/5 — rest hit 100k token/day limit)
 
 ## Active feature slice
-FA — FINAL ANSWER marker enforcement (PR #58, awaiting merge).
+None — CR2 and FA both merged.
 
 ## Documentation
 - documents/code_walkthroughs/code_flow.md — end-to-end harness walkthrough (single Anthropic provider)
 - documents/code_walkthroughs/2.llm_backend_expansion.md — multi-provider LLM abstraction layer
 
-## Completed slices (CR2 merged; FA awaiting merge)
+## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
 - Dataset loading from HuggingFace (preview + full splits, repo-level data.zip)
 - Container lifecycle management (start, exec, stop, scratch/artifacts)
@@ -88,7 +87,7 @@ FA — FINAL ANSWER marker enforcement (PR #58, awaiting merge).
 - Fix hb022 scorer: list normalisation step in score_answer() — PR #53
 - docs: update walkthrough 3 with 4-step score_answer pipeline — PR #54
 - CR2-1..5: second critic exchange (_critic_rounds, CRITIC_FOLLOWUP_PROMPT, after_critic_response, max_critic_rounds) — PR #57
-- FA-1..3: FINAL ANSWER marker enforcement (re-prompt + format_warning) — PR #58 (awaiting merge)
+- FA-1..3: FINAL ANSWER marker enforcement (re-prompt + format_warning) — PR #58
 
 ## Pending slices
 - Curated bioinformatics tools (structured wrappers for DESeq2, STAR, featureCounts)
@@ -118,6 +117,5 @@ FA — FINAL ANSWER marker enforcement (PR #58, awaiting merge).
   format_warning and accepts. No code change needed to activate — it's always on.
 - Judge model defaults: claude-haiku-4-5-20251001 (Anthropic runs), same as agent model (others)
 - Preflight ping: validates all model endpoints before Docker starts — fail fast on bad model names
-- All fixes in PRs #1–#58; CR2 merged; FA (#58) awaiting merge
+- All fixes in PRs #1–#58, all merged to main
 - Docker image: bio-mystery-bench:latest (~4GB, cached locally)
-- Merge FA PR #58 before starting any new feature slice

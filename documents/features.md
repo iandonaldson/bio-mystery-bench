@@ -495,7 +495,7 @@ Sub-slices (PR #57, merged 2026-05-22):
 
 ---
 
-### ✅ Qwen3 Trajectory Post-Mortem Remediations — Enforce FINAL ANSWER Marker (FA-1 to FA-3)
+### ✅ Qwen3 Trajectory Post-Mortem Remediations — Enforce FINAL ANSWER Marker (FA-1 to FA-3, PR #58)
 
 Root cause addressed: Qwen3 trajectories sometimes ended without a `FINAL ANSWER:` line, causing
 `extract_final_answer` to fall back to the last non-empty line — an unreliable heuristic.
@@ -507,7 +507,7 @@ Root cause addressed: Qwen3 trajectories sometimes ended without a `FINAL ANSWER
   asking the agent to restate `FINAL ANSWER: <answer>` and continue the loop
 - If response still lacks marker after re-prompt: log `format_warning` trajectory event and accept
 
-Sub-slices (PR #58, open 2026-05-22):
+Sub-slices (PR #58, merged 2026-05-22):
 - FA-1 ✅: `_has_final_answer_marker` helper + 4 unit tests
 - FA-2 ✅: `_final_answer_reprompted` flag + re-prompt logic + `test_reprompts_once_when_marker_missing`
 - FA-3 ✅: `format_warning` fallback + `test_accepts_after_one_reprompt_with_format_warning`
