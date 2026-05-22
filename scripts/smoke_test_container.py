@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 """
-ENV-3/ENV-5 smoke test: verify that python3, pip, and bedtools are accessible
-on the default $PATH inside a fresh bio-mystery-bench container.
+Smoke test for the bio-mystery-bench container.
+
+Verifies:
+  ENV-3/ENV-5: python3, pip, bedtools, samtools are on the default $PATH.
+  GM-5: the bio method reference SKILLs are present at /workspace/skills/.
+
+Rebuild the image from the repo root before running:
+    docker build -t bio-mystery-bench:latest -f docker/Dockerfile .
+
+(The Dockerfile uses COPY paths relative to the repo root because the GM-5
+SKILLs live in SKILLS/*/SKILL.md — building with `docker/` as the context
+would fail.)
 
 Usage:
     python3 scripts/smoke_test_container.py
@@ -26,6 +36,10 @@ CHECKS = [
     ("bedtools --version", "bedtools"),
     ("samtools --version", "samtools"),
     ("which python3 pip bedtools samtools", "which all tools"),
+    ("test -f /workspace/skills/deg-functional-enrichment.md && echo present",
+     "skill: deg-functional-enrichment"),
+    ("test -f /workspace/skills/chipseq-tf-identification.md && echo present",
+     "skill: chipseq-tf-identification"),
 ]
 
 
