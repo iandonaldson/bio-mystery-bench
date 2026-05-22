@@ -126,6 +126,19 @@ None — Qwen3 post-mortem remediations (CR2, BE, FA, CP) all merged 2026-05-22.
 - 3 new tests in TestCriticPromptAlternatives (CP-1..3)
 - CR2 and FA test classes added by sibling agents
 
+## Next steps (in priority order)
+1. Merge PR #65 (features.md + progress log doc update) — no code changes, safe to merge immediately
+2. README update — `--max-critic-rounds` and `after_critic_response` injection point are missing
+   from the CLI options table; walkthrough #7 is missing from the References section (§"Further
+   reading"). CLAUDE.md requires README updates after any harness behaviour change.
+3. Benchmark rerun — re-run the 5-problem preview comparison with the new flags:
+   `--critic-injection-points after_final_answer --critic-injection-points after_critic_response --max-critic-rounds 2`
+   This directly measures whether CR2 + FA + BE + CP raise Qwen3 pass@1 above 0% on the
+   human-solvable subset (hb020, hb002, recqgsfxqqodhjens).
+4. CI guard (optional) — add a test or linter rule that diffs the set of `self.*` references in
+   `_loop` against assignments in `__init__`, so missing initialisers (like FA's `_final_answer_reprompted`)
+   are caught before merge rather than after.
+
 ## Notes for next agent session
 - Provider flags: --provider anthropic|openai|ollama|groq, --api-base-url, --api-key, --judge-model
 - Groq: reads GROQ_API_KEY, auto base URL https://api.groq.com/openai/v1
