@@ -9,6 +9,7 @@ from harness.agent import (
     _extract_text,
     _format_result,
     _handle_abort,
+    _has_final_answer_marker,
     _summarize_blast_output,
     ResourceEstimate,
     AgentResult,
@@ -825,6 +826,22 @@ class TestCriticMultiRound:
         assert len(critic_calls) == 1
         assert critic_calls[0].args[1]["round"] == 1
         assert critic_client.chat.call_count == 1
+
+
+class TestFinalAnswerMarker:
+    def test_marker_present_returns_true(self):
+        assert _has_final_answer_marker("Reasoning here. FINAL ANSWER: 42") is True
+
+    def test_marker_missing_returns_false(self):
+        assert _has_final_answer_marker("The answer is probably 42.") is False
+
+    def test_marker_with_only_whitespace_after_returns_false(self):
+        assert _has_final_answer_marker("FINAL ANSWER:   ") is False
+        assert _has_final_answer_marker("FINAL ANSWER:\n\n") is False
+
+    def test_marker_mid_text_returns_true(self):
+        text = "Some preamble.\nFINAL ANSWER: Bacillus licheniformis\nTrailing notes."
+        assert _has_final_answer_marker(text) is True
 
 
 class TestRunEvalCriticFlags:

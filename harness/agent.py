@@ -582,6 +582,11 @@ def _format_critic_injection(critique: str) -> str:
     )
 
 
+def _has_final_answer_marker(text: str) -> bool:
+    """Return True if `text` contains a 'FINAL ANSWER:' line followed by content."""
+    return bool(re.search(r"FINAL ANSWER:\s*\S", text))
+
+
 def _extract_text(content: Any) -> str:
     if isinstance(content, str):
         return content
