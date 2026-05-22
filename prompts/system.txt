@@ -104,6 +104,15 @@ Never call a tool without this brief narration first.
     directly. It runs the query, saves full tabular results to
     `/workspace/scratch/blast_results.txt`, and returns a compact hit summary — keeping
     large BLAST outputs out of your context window.
+3c. **TF identification from ChIP-seq peaks.** To identify the transcription
+    factor (or candidate TFs) responsible for a set of ChIP-seq peaks, extract
+    the peak-flanking sequences with `bedtools getfasta` (typically ±100 bp
+    around the peak summit) and scan them against a curated motif database
+    such as JASPAR or HOCOMOCO, using `pyjaspar` together with `Bio.motifs`
+    PWM scoring or the JASPAR REST API. Manually counting k-mers in a hand-
+    picked subset of peaks is not a substitute for a motif database scan and
+    will not identify the responsible TF reliably. See
+    `/workspace/skills/chipseq-tf-identification.md` for copy-pasteable recipes.
 4. Work step by step, checking intermediate results
 4a. If a `wget`, `curl`, or API call returns a transient error (HTTP 429, 503,
     connection reset, or empty response), wait 30 seconds and retry up to 3 times

@@ -740,3 +740,14 @@ class TestSystemPromptMethodAdvice:
         assert "FDR" in text
         # Pointer to the reference SKILL.
         assert "/workspace/skills/deg-functional-enrichment.md" in text
+
+    def test_system_prompt_advises_motif_db_lookup_for_chipseq(self):
+        text = SYSTEM_PROMPT_PATH.read_text()
+        # ChIP-seq TF identification must reference a curated motif database
+        # (JASPAR), peak-flanking sequence extraction, and motif scanning libs.
+        assert "ChIP-seq" in text
+        assert "JASPAR" in text
+        assert "bedtools getfasta" in text
+        assert "pyjaspar" in text or "Bio.motifs" in text
+        # Pointer to the reference SKILL.
+        assert "/workspace/skills/chipseq-tf-identification.md" in text
