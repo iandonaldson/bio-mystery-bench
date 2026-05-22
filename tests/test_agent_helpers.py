@@ -724,6 +724,12 @@ class TestCriticMultiRound:
         from harness.config import RunConfig
         assert RunConfig().max_critic_rounds == 2
 
+    def test_critic_followup_prompt_exists_and_mentions_verification(self):
+        from harness.agent import CRITIC_FOLLOWUP_PROMPT
+        assert "verified" in CRITIC_FOLLOWUP_PROMPT
+        assert "verified-wrong" in CRITIC_FOLLOWUP_PROMPT
+        assert "unverified-verbal-only" in CRITIC_FOLLOWUP_PROMPT
+
 
 class TestBlastToolDefinition:
     def test_name_is_blast_search(self):

@@ -136,6 +136,22 @@ At the end, state whether any HIGH-risk assumption would plausibly change the
 final answer if it turned out to be wrong.\
 """
 
+CRITIC_FOLLOWUP_PROMPT = """\
+You previously audited this agent's reasoning. The agent has now responded.
+Review the new tool calls and reasoning since your last critique.
+
+For each HIGH-risk assumption you flagged: (a) did the agent empirically test
+it via a tool call? Mark each as one of:
+- verified           — the agent ran a tool call that confirmed the assumption
+- verified-wrong     — the agent ran a tool call that contradicted the assumption
+- unverified-verbal-only — the agent only re-stated or argued, without testing
+
+If any HIGH-risk assumption remains unverified-verbal-only, list 1-2 alternative
+answers that would also be consistent with the evidence collected so far.
+
+Conclude with a one-line verdict: 'concerns resolved' or 'concerns remain'.\
+"""
+
 # Commands run before the agent starts — logged and injected as environment context
 RESOURCE_CHECK_CMD = """\
 echo "=== CPU ===" && nproc && \
