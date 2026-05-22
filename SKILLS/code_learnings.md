@@ -400,3 +400,51 @@ confirmed matches skip the API call.
 predicted format and the rubric format differ structurally but are semantically equivalent
 (list syntax, unit differences, synonym resolution). Add the step before the LLM judge,
 unit-test it with the real rubric string, and update `documents/code_walkthroughs/3.Accommodating_OpenAI_models.md` section §7.
+
+---
+
+## L-19: New behavioral constraints on the end_turn path break existing mock fixtures
+
+**Lesson (2026-05-22):** FA-2 added FINAL ANSWER marker enforcement to `_loop`'s `end_turn`
+branch. This immediately broke two CR2 tests whose mock responses used strings like `"answer0"`
+with no marker. The re-prompt path consumed an extra `client.chat` call from the `side_effect`
+list; once exhausted, `MagicMock` raised `StopIteration` (caught as a generic exception),
+causing `AgentRun.run()` to return `status="error"` instead of `"success"`. The tests
+appeared to test the right thing but gave the wrong status — a subtle failure with no obvious
+traceback pointing at the fixture.
+
+**Rule:** Any mock response that drives an `end_turn` path in `_loop` must satisfy **all
+active behavioral constraints on that path**. Currently those are:
+1. Critic injection (rounds < max_critic_rounds, injection point enabled)
+2. FINAL ANSWER marker (`_has_final_answer_marker` must return `True`, or an extra
+   `client.chat` call is consumed for the re-prompt)
+
+When you add a new constraint to the `end_turn` branch, grep for existing tests that mock
+`client.chat` with `end_turn` responses and update their fixtures to satisfy the new
+constraint. The fix is usually one line — e.g. prefix mock text with `"FINAL ANSWER: "`.
+
+**Detection:** if a test that previously returned `status="success"` starts returning
+`status="error"` after a seemingly unrelated change to `_loop`, suspect that the new code
+consumed an extra loop iteration that the `side_effect` list didn't budget for.
+
+---
+
+## L-20: In a git worktree, `git checkout main` fails — branch from origin/main instead
+
+**Lesson (2026-05-22):** Worktrees check out branches independently of the primary repo.
+Running `git checkout main` inside a worktree raises:
+
+```
+fatal: 'main' is already used by worktree at '/path/to/primary-repo'
+```
+
+**Rule:** Never attempt `git checkout main` from inside a worktree. Instead, create feature
+branches directly from the remote:
+
+```bash
+git fetch origin
+git checkout -b claude/<slice-name> origin/main
+```
+
+This sets up tracking automatically and ensures the branch starts from the latest main
+without needing to check out main locally.
