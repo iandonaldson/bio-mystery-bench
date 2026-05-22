@@ -623,6 +623,24 @@ def _progress_footer(steps_used: int, max_steps: int, input_tokens: int) -> str:
     return footer
 
 
+def _get_blast_version(container: Container, program: str) -> str:
+    """Run `<program> -version` in the container and return its first stdout line.
+
+    Returns "" on non-zero exit, timeout, or any other failure. Used to disambiguate
+    empty BLAST results from a missing binary (see L-12 in SKILLS/code_learnings.md).
+    """
+    try:
+        stdout, _stderr, rc = container.exec_command(f"{program} -version", timeout=5)
+    except TimeoutError:
+        return ""
+    except Exception:
+        return ""
+    if rc != 0:
+        return ""
+    first_line = stdout.strip().splitlines()[0] if stdout.strip() else ""
+    return first_line
+
+
 def _summarize_blast_output(stdout: str, max_hits: int = 10) -> str:
     """Parse BLAST tabular output (outfmt 6) into a compact summary table."""
     lines = [l for l in stdout.strip().splitlines() if l and not l.startswith("#")]

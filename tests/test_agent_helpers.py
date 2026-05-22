@@ -8,6 +8,7 @@ import pytest
 from harness.agent import (
     _extract_text,
     _format_result,
+    _get_blast_version,
     _handle_abort,
     _summarize_blast_output,
     ResourceEstimate,
@@ -688,6 +689,27 @@ class TestSummarizeBlastOutput:
         result = _summarize_blast_output(_blast_row(evalue="2e-50", bitscore="300"))
         assert "2e-50" in result
         assert "300" in result
+
+
+# ---------------------------------------------------------------------------
+# BLAST version cache + empty-summary disambiguation (BE-1..4)
+# ---------------------------------------------------------------------------
+
+class TestBlastVersionAndSummary:
+    def test_get_blast_version_returns_first_line_on_success(self):
+        container = MagicMock()
+        container.exec_command.return_value = ("blastn: 2.13.0+\nPackage: blast 2.13.0\n", "", 0)
+        assert _get_blast_version(container, "blastn") == "blastn: 2.13.0+"
+
+    def test_get_blast_version_returns_empty_on_rc_nonzero(self):
+        container = MagicMock()
+        container.exec_command.return_value = ("", "command not found", 1)
+        assert _get_blast_version(container, "blastn") == ""
+
+    def test_get_blast_version_handles_timeout(self):
+        container = MagicMock()
+        container.exec_command.side_effect = TimeoutError("timed out")
+        assert _get_blast_version(container, "blastn") == ""
 
 
 # ---------------------------------------------------------------------------
