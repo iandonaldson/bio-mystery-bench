@@ -324,20 +324,27 @@ class AgentRun:
                         })
                         continue
 
-                # FINAL ANSWER marker enforcement: re-prompt once if missing.
-                if not _has_final_answer_marker(response.text) and not self._final_answer_reprompted:
-                    self._final_answer_reprompted = True
-                    self.messages.append({
-                        "role": "user",
-                        "content": [{
-                            "type": "text",
-                            "text": (
-                                "Your previous response did not include a FINAL ANSWER: line. "
-                                "Restate your conclusion as: FINAL ANSWER: <answer>"
-                            ),
-                        }],
+                # FINAL ANSWER marker enforcement: re-prompt once if missing;
+                # if still missing after the re-prompt, log a format_warning
+                # and accept the response.
+                if not _has_final_answer_marker(response.text):
+                    if not self._final_answer_reprompted:
+                        self._final_answer_reprompted = True
+                        self.messages.append({
+                            "role": "user",
+                            "content": [{
+                                "type": "text",
+                                "text": (
+                                    "Your previous response did not include a FINAL ANSWER: line. "
+                                    "Restate your conclusion as: FINAL ANSWER: <answer>"
+                                ),
+                            }],
+                        })
+                        continue
+                    self.logger.log("format_warning", {
+                        "reason": "FINAL ANSWER marker missing after re-prompt",
+                        "text_excerpt": response.text[:300],
                     })
-                    continue
 
                 self.logger.log("status", {"status": "success", "final_message": response.text})
                 return AgentResult(

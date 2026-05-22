@@ -907,6 +907,32 @@ class TestFinalAnswerReprompt:
         assert "FINAL ANSWER" in result.final_message
         assert result.status == "success"
 
+    def test_accepts_after_one_reprompt_with_format_warning(self):
+        # Both responses lack the marker — after one re-prompt, accept and warn.
+        run, result, client, logger = self._run([
+            "Answer is probably 42, no formal marker.",
+            "Still no marker on this attempt either.",
+        ])
+        assert client.chat.call_count == 2
+
+        reprompt_msgs = [
+            m for m in run.messages
+            if m.get("role") == "user"
+            and isinstance(m.get("content"), list)
+            and any(
+                isinstance(b, dict)
+                and b.get("type") == "text"
+                and "did not include a FINAL ANSWER" in b.get("text", "")
+                for b in m["content"]
+            )
+        ]
+        assert len(reprompt_msgs) == 1
+
+        warning_calls = [c for c in logger.log.call_args_list if c.args[0] == "format_warning"]
+        assert len(warning_calls) == 1
+        assert "FINAL ANSWER marker missing" in warning_calls[0].args[1]["reason"]
+        assert result.status == "success"
+
 
 class TestRunEvalCriticFlags:
     """CLI wiring for the second critic flags (CR2-5)."""
