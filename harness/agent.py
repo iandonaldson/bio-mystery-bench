@@ -210,6 +210,7 @@ class AgentRun:
         self.output_tokens = 0
         self.cache_read_tokens = 0
         self._critic_rounds: int = 0
+        self._final_answer_reprompted: bool = False
 
     def run(self) -> AgentResult:
         start = time.monotonic()
@@ -322,6 +323,28 @@ class AgentRun:
                             "content": _format_critic_injection(critique),
                         })
                         continue
+
+                # FINAL ANSWER marker enforcement: re-prompt once if missing;
+                # if still missing after the re-prompt, log a format_warning
+                # and accept the response.
+                if not _has_final_answer_marker(response.text):
+                    if not self._final_answer_reprompted:
+                        self._final_answer_reprompted = True
+                        self.messages.append({
+                            "role": "user",
+                            "content": [{
+                                "type": "text",
+                                "text": (
+                                    "Your previous response did not include a FINAL ANSWER: line. "
+                                    "Restate your conclusion as: FINAL ANSWER: <answer>"
+                                ),
+                            }],
+                        })
+                        continue
+                    self.logger.log("format_warning", {
+                        "reason": "FINAL ANSWER marker missing after re-prompt",
+                        "text_excerpt": response.text[:300],
+                    })
 
                 self.logger.log("status", {"status": "success", "final_message": response.text})
                 return AgentResult(
@@ -580,6 +603,11 @@ def _format_critic_injection(critique: str) -> str:
         "- If you disagree, briefly explain why and restate your original FINAL ANSWER.\n"
         "You must end with: FINAL ANSWER: <answer>"
     )
+
+
+def _has_final_answer_marker(text: str) -> bool:
+    """Return True if `text` contains a 'FINAL ANSWER:' line followed by content."""
+    return bool(re.search(r"FINAL ANSWER:\s*\S", text))
 
 
 def _extract_text(content: Any) -> str:
