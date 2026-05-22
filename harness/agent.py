@@ -210,6 +210,7 @@ class AgentRun:
         self.output_tokens = 0
         self.cache_read_tokens = 0
         self._critic_rounds: int = 0
+        self._final_answer_reprompted: bool = False
 
     def run(self) -> AgentResult:
         start = time.monotonic()
@@ -322,6 +323,21 @@ class AgentRun:
                             "content": _format_critic_injection(critique),
                         })
                         continue
+
+                # FINAL ANSWER marker enforcement: re-prompt once if missing.
+                if not _has_final_answer_marker(response.text) and not self._final_answer_reprompted:
+                    self._final_answer_reprompted = True
+                    self.messages.append({
+                        "role": "user",
+                        "content": [{
+                            "type": "text",
+                            "text": (
+                                "Your previous response did not include a FINAL ANSWER: line. "
+                                "Restate your conclusion as: FINAL ANSWER: <answer>"
+                            ),
+                        }],
+                    })
+                    continue
 
                 self.logger.log("status", {"status": "success", "final_message": response.text})
                 return AgentResult(
