@@ -752,6 +752,13 @@ class TestSystemPromptMethodAdvice:
         # Pointer to the reference SKILL.
         assert "/workspace/skills/chipseq-tf-identification.md" in text
 
+    def test_system_prompt_mentions_workspace_skills_directory(self):
+        text = SYSTEM_PROMPT_PATH.read_text()
+        # The Environment details section must tell the agent where to find
+        # the in-container recipes and how to list them.
+        assert "/workspace/skills/" in text
+        assert "ls /workspace/skills/" in text
+
 
 # ---------------------------------------------------------------------------
 # Reference SKILL files  (GM-3, GM-4)

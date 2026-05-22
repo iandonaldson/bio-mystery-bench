@@ -195,6 +195,10 @@ samtools, bcftools, bedtools, biopython, scanpy, anndata, pandas, numpy, scipy, 
 pysam, salmon, kallisto, STAR, bowtie2, hisat2, minimap2,
 R (with DESeq2, edgeR, limma, ggplot2, dplyr), pip, conda/micromamba
 
+Bio method recipes are in /workspace/skills/. Run `ls /workspace/skills/` to see
+what's available, then `cat /workspace/skills/<name>.md` to read a recipe before
+implementing the corresponding analysis.
+
 Install additional tools if needed:
 ```bash
 pip install <package>
