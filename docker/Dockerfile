@@ -57,10 +57,19 @@ SHELL ["/bin/bash", "--login", "-c"]
 # Expose conda tools on the default PATH for non-login bash shells (e.g. docker exec)
 ENV PATH=/opt/conda/bin:$PATH
 
-RUN mkdir -p /workspace/data /workspace/scratch /workspace/output
+RUN mkdir -p /workspace/data /workspace/scratch /workspace/output /workspace/skills
 WORKDIR /workspace
 
-COPY entrypoint.sh /entrypoint.sh
+# Bio method reference recipes. Source of truth lives at SKILLS/<name>/SKILL.md
+# in the repo root — these copies are baked into /workspace/skills/ so the agent
+# can `cat` them in-container without needing internet access.
+# NOTE: requires `docker build -f docker/Dockerfile .` from the repo root (not
+# `docker build docker/`); see scripts/smoke_test_container.py for the canonical
+# rebuild command.
+COPY SKILLS/deg-functional-enrichment/SKILL.md /workspace/skills/deg-functional-enrichment.md
+COPY SKILLS/chipseq-tf-identification/SKILL.md /workspace/skills/chipseq-tf-identification.md
+
+COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 CMD ["/entrypoint.sh"]

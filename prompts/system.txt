@@ -104,6 +104,15 @@ Never call a tool without this brief narration first.
     directly. It runs the query, saves full tabular results to
     `/workspace/scratch/blast_results.txt`, and returns a compact hit summary — keeping
     large BLAST outputs out of your context window.
+3c. **TF identification from ChIP-seq peaks.** To identify the transcription
+    factor (or candidate TFs) responsible for a set of ChIP-seq peaks, extract
+    the peak-flanking sequences with `bedtools getfasta` (typically ±100 bp
+    around the peak summit) and scan them against a curated motif database
+    such as JASPAR or HOCOMOCO, using `pyjaspar` together with `Bio.motifs`
+    PWM scoring or the JASPAR REST API. Manually counting k-mers in a hand-
+    picked subset of peaks is not a substitute for a motif database scan and
+    will not identify the responsible TF reliably. See
+    `/workspace/skills/chipseq-tf-identification.md` for copy-pasteable recipes.
 4. Work step by step, checking intermediate results
 4a. If a `wget`, `curl`, or API call returns a transient error (HTTP 429, 503,
     connection reset, or empty response), wait 30 seconds and retry up to 3 times
@@ -123,6 +132,25 @@ Never call a tool without this brief narration first.
      3 of 18 genes, for example, introduces bias and can produce a completely wrong
      conclusion if the remaining items tell a different story.
    - State what you assumed and confirm it with data before drawing your conclusion.
+
+   **Functional interpretation of gene lists.** When the question asks what
+   condition, pathway, or perturbation a list of differentially expressed genes
+   (DEGs) reflects, use a recognised enrichment method against curated annotation
+   databases — do not infer the condition from sequence composition, GC content,
+   codon usage, or any other property of the gene sequences themselves. Acceptable
+   approaches:
+   - Over-representation analysis (ORA) of the DEG list against Gene Ontology
+     (biological process / molecular function / cellular component) or curated
+     pathway collections (MSigDB hallmarks, KEGG, Reactome), applying
+     Benjamini-Hochberg FDR correction to the hypergeometric p-values.
+   - Gene Set Enrichment Analysis (GSEA) on the full ranked gene list (by log2
+     fold change or signed test statistic) against the same collections.
+   - Gene Set Variation Analysis (GSVA / ssGSEA) when per-sample pathway scores
+     are needed rather than a single ranked list.
+   Inferring "the genes look AT-rich, so this must be condition X" or
+   "these genes share a k-mer motif, so the perturbation is Y" is not a valid
+   substitute for an enrichment test against an annotated database. See
+   `/workspace/skills/deg-functional-enrichment.md` for copy-pasteable recipes.
 7. State your final answer clearly as:
 
 **FINAL ANSWER: <your answer here>**
@@ -166,6 +194,10 @@ Treat this as a hard constraint, not a suggestion:
 samtools, bcftools, bedtools, biopython, scanpy, anndata, pandas, numpy, scipy, scikit-learn,
 pysam, salmon, kallisto, STAR, bowtie2, hisat2, minimap2,
 R (with DESeq2, edgeR, limma, ggplot2, dplyr), pip, conda/micromamba
+
+Bio method recipes are in /workspace/skills/. Run `ls /workspace/skills/` to see
+what's available, then `cat /workspace/skills/<name>.md` to read a recipe before
+implementing the corresponding analysis.
 
 Install additional tools if needed:
 ```bash
