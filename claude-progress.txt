@@ -1,30 +1,24 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-22 — Agent A close-session: added the missing GM section (GM-1..6, PR #60) to
-`documents/features.md` with full sub-slice detail matching the CR2/FA/BE/CP style; added
-L-22 (Docker build-context tension between brief constraints and existing
-`ensure_docker_image()` invocation) and L-23 (multi-agent test-file conflict pattern at
-shared insertion sites) to `SKILLS/code-learnings/SKILL.md`; wrote
-`documents/code_walkthroughs/9.Agent_A_walkthrough.md`; added the new walkthrough to the
-README References section. Bumped `## Completed slices` and `## Test status` to reflect
-PR #60 (296/296 passing). Added the README/`ensure_docker_image()` build-context update
-to Next steps as priority 1 (latent bug — next image rebuild will fail).
+2026-05-22 — Post-remediation Qwen3 rerun complete (RERUN-5). Fixed latent Docker build
+context bug (`ensure_docker_image()` now passes repo root as context, README updated).
+Ran 5-problem preview with two-round critic + all post-mortem fixes. Results recorded
+below: pass@1 20% (was 0%), pass@5 80% (was 60%). Both primary pass criteria met.
+hb002 regressed (0/5, was 1/5) — new failure modes: resource_abort citing missing
+HMMER/barrnap + hallucinated wrong-species answers. hb022 and hb053 now have pass@5
+for the first time.
 
-Earlier today: Agent B close-session migrated SKILLs to the directory format and
-generalised the close protocol into `SKILLS/session-close/SKILL.md`. Agent C work merged.
-Qwen3 post-mortem remediations (CR2 PR #57, FA PR #58, BE PR #56, CP PR #59) all merged.
-Code learnings L-19/L-20 merged (PR #63). Agent C walkthrough merged (PR #64).
-GM (PR #60) merged as part of the same 2026-05-22 parallel-agent batch.
+Earlier: Agent A close-session added GM section to features.md, L-22/L-23 to learnings,
+walkthrough #9. Agent B close-session migrated SKILLs to directory format. Qwen3 post-
+mortem remediations (CR2/FA/BE/CP/GM, PRs #56–#60) all merged.
 
 ## Current status
 Harness is fully functional with Anthropic, Groq, and Cerebras (OpenAI-compatible)
-providers. 296/296 tests passing. All prerequisite harness fixes (ENV-1–5, SC-1–4,
-SP-1/2, NR-1/2, RL-1–5, RBfix-1/2, B-1–3) merged, plus today's CR2/BE/FA/CP/GM rounds.
-RERUN-1 to RERUN-4 complete: apples-to-apples comparison run done; results recorded
-below. Ready for a new Qwen3 trajectory rerun to measure whether the post-mortem fixes
-improve pass@1 on attempts that previously looped on empty BLAST, omitted FINAL
-ANSWER markers, or attempted DEG/ChIP-seq interpretation without curated-DB lookup.
+providers. 296/296 tests passing. RERUN-5 (post-remediation Qwen3) complete: pass@1
+met the ≥20% target (20.0%), pass@5 exceeded target (80.0%). Docker build context bug
+fixed (PR pending on close-agent-a branch). hb002 regressed — needs trajectory review
+to understand new failure modes (resource_abort + hallucinated IDs).
 
 ## Comparative Results (RERUN-2 / RERUN-3, 2026-05-19)
 
@@ -46,7 +40,7 @@ Per-problem breakdown:
 - hb022 (pancreatic samples):     Both ❌ 0/5 (human_solvable=False)
 - hb053 (heat stress):            Both ❌ 0/5 (human_solvable=False)
 
-Key finding: Qwen3 solves the same 3 human-solvable problems as Sonnet when given 5 attempts,
+Key finding (baseline): Qwen3 solves the same 3 human-solvable problems as Sonnet when given 5 attempts,
 but never on attempt 1 (pass@1=0%). Sonnet is consistently correct on first attempt for all
 3 human-solvable problems (pass@1=100% on human-solvable subset). Qwen3 is 3× cheaper but
 requires multiple attempts — high brittle fraction (40%) reflects this unreliability.
@@ -54,6 +48,36 @@ requires multiple attempts — high brittle fraction (40%) reflects this unrelia
 Earlier preview benchmark results (pre-fix harness, for reference):
 - Claude Sonnet 4.6 (Anthropic): 80% pass@1 (from earlier run, without critic)
 - llama-3.3-70b (Groq free tier): 20% pass@1 (1/5 — rest hit 100k token/day limit)
+
+## Comparative Results (RERUN-5, 2026-05-22 — post-remediation Qwen3)
+
+5-problem preview split, 5 attempts each, two-round critic (after_final_answer +
+after_critic_response, max_critic_rounds=2), critic model claude-haiku-4-5-20251001.
+Comparison report: results_version_0.2/comparison-post-remediation.md
+
+| Metric              | Qwen3 baseline (2026-05-19) | Qwen3 post-remediation (2026-05-22) |
+|---------------------|-----------------------------|--------------------------------------|
+| pass@1              | 0.0%                        | **20.0%** ✅ (target ≥20%)           |
+| pass@5              | 60.0%                       | **80.0%** ✅ (target ≥60%)           |
+| pass@1 (human-solv) | 0.0%                        | **33.3%**                            |
+| Total cost (USD)    | $8.59                       | **$4.95** (42% cheaper)              |
+
+Per-problem breakdown (new run):
+- hb020 (Homo sapiens PDB, HS=True):    ❌ pass@1 | ✅ pass@5 (attempt 3 correct)
+- hb002 (Bacillus licheniformis, HS=True): ❌ pass@1 | ❌ pass@5 ⚠️ REGRESSION (was ✅ pass@5)
+  - Attempt 2: resource_abort claiming BLAST/HMMER/barrnap unavailable
+  - Attempts 1,3,4,5: hallucinated wrong species (B.cereus, V.cholerae, L.casei, E.coli)
+- recqgsfxqqodhjens (CTCF motif, HS=True): ✅ pass@1 ✅ (first time!) | ✅ pass@5
+  - Attempts 4+5: resource_abort on network timeout (downloading reference genome)
+- hb022 (pancreatic samples, HS=False):  ❌ pass@1 | ✅ pass@5 (attempts 2+5 correct) — improvement!
+- hb053 (heat stress, HS=False):         ❌ pass@1 | ✅ pass@5 (attempt 4 correct) — improvement!
+
+Pass criteria vs targets:
+- pass@1 ≥ 20%: ✅ 20.0%
+- pass@5 ≥ 60%: ✅ 80.0%
+- resource_abort ≤ 1/25: ❌ 3/25 (hb002_a2, recq_a4, recq_a5)
+- empty final_message = 0/25: ✅ 0 (recq_a2 was error status, not empty final)
+- cost delta < $2: ✅ −$3.64 (cheaper!)
 
 ## Active feature slice
 None — Qwen3 post-mortem remediations (CR2, BE, FA, CP, GM) all merged 2026-05-22.
@@ -153,31 +177,20 @@ None — Qwen3 post-mortem remediations (CR2, BE, FA, CP, GM) all merged 2026-05
 - CR2 and FA test classes added by sibling agents
 
 ## Next steps (in priority order)
-1. Docker build context update (latent bug from PR #60) — `scripts/run_eval.py:ensure_docker_image()`
-   (line ~115) still passes `dockerfile_dir` (= `docker/`) as the build context, and
-   `README.md` quick-start documents the same. PR #60 added `COPY SKILLS/...` directives that
-   require **repo root** as the build context — the next time `docker image inspect` fails
-   (cache cleared, image deleted, new VM) the auto-rebuild will fail with
-   "SKILLS/deg-functional-enrichment/SKILL.md: not found". Fix: change the subprocess call to
-   `["docker", "build", "-t", image_name, "-f", str(dockerfile_dir / "Dockerfile"),
-   str(dockerfile_dir.parent)]`, and update the README quick-start to
-   `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .` from repo root.
-   The currently cached image keeps live runs working until then. See L-22 for the
-   reasoning behind why this gap was unavoidable inside the GM brief's file-list constraint.
+1. ✅ Docker build context fix — `ensure_docker_image()` now passes repo root + `-f docker/Dockerfile`;
+   README quick-start updated. Committed on close-agent-a branch (PR pending).
 2. README update — `--max-critic-rounds` and `after_critic_response` injection point are still
-   missing from the CLI options table in `README.md`. Walkthroughs #7, #8, and #9 are now
-   linked in the References section but the CLI options table itself was left untouched
-   because this session did not own the CR2 CLI work. A small follow-up PR should add
-   those flags to the table.
-3. Benchmark rerun — re-run the 5-problem preview comparison with the new flags:
-   `--critic-injection-points after_final_answer --critic-injection-points after_critic_response --max-critic-rounds 2`
-   This directly measures whether CR2 + FA + BE + CP + GM raise Qwen3 pass@1 above 0% on the
-   human-solvable subset (hb020, hb002, recqgsfxqqodhjens). Compare against the 2026-05-19
-   baseline using `scripts/compare_runs.py`; record the new numbers in this file and in
-   `documents/features.md` under "Comparative Results". The hb053 (heat stress) and hb022
-   (pancreatic samples) cases are particularly worth re-checking now that GM advises against
-   sequence-composition-based inference.
-4. CI guard against missing initialisers — add a test or AST-based linter rule that diffs the
+   missing from the CLI options table in `README.md`. A small follow-up PR should add those flags.
+3. ✅ Benchmark rerun (RERUN-5) — complete. Results in claude-progress.txt §Comparative Results
+   (RERUN-5). pass@1=20%, pass@5=80%. Both primary targets met.
+4. hb002 regression post-mortem — hb002 went from pass@5=✅ (baseline) to 0/5 (new run).
+   New failure patterns: (a) attempt 2 resource_abort claiming BLAST/HMMER/barrnap unavailable
+   even with BE fix active — agent bypassed blast_search and tried direct bash BLAST; (b)
+   attempts 1,3,4,5 hallucinated completely wrong species (B.cereus, V.cholerae, L.casei, E.coli).
+   The BE fix helps when blast_search is called; it does not prevent the agent from bypassing
+   the tool entirely. Next action: review hb002 trajectories to confirm bypass pattern, then
+   consider strengthening the system prompt to require blast_search over raw bash BLAST calls.
+5. CI guard against missing initialisers — add a test or AST-based linter rule that diffs the
    set of `self.X` references inside `AgentRun._loop` against the set of `self.X = ...`
    assignments in `AgentRun.__init__`. The motivating incident is captured in L-21 — FA's
    `_final_answer_reprompted` reference shipped without an initialiser, breaking 4 tests on
@@ -202,20 +215,19 @@ None — Qwen3 post-mortem remediations (CR2, BE, FA, CP, GM) all merged 2026-05
 - Preflight ping: validates all model endpoints before Docker starts — fail fast on bad model names
 - All fixes in PRs #1–#60 merged to main
 - Docker image: bio-mystery-bench:latest (~4GB, cached locally). Build with
-  `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .` from repo root —
-  PR #60 added `COPY SKILLS/...` directives that need repo-root context. README and
-  `ensure_docker_image()` still document the old `docker/`-as-context invocation
-  (Next steps item 1)
-- Bio method recipes available in-container at /workspace/skills/ (PR #60): the agent
-  can `cat /workspace/skills/deg-functional-enrichment.md` or
-  `cat /workspace/skills/chipseq-tf-identification.md` to get copy-pasteable analysis
-  recipes. Libraries (`gseapy`, `pyjaspar`) install on demand via `pip install`
+  `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .` from repo root.
+  ensure_docker_image() now uses this correctly (fixed on close-agent-a branch).
+- Bio method recipes in-container at /workspace/skills/ (PR #60): agent can
+  `cat /workspace/skills/deg-functional-enrichment.md` or
+  `cat /workspace/skills/chipseq-tf-identification.md` for copy-pasteable recipes.
+  Libraries (`gseapy`, `pyjaspar`) install on demand via `pip install`.
+- Post-remediation rerun (RERUN-5) results: pass@1=20%, pass@5=80%.
+  Results dir: worktree results/ (trajectories/scores.json).
+  Comparison: results_version_0.2/comparison-post-remediation.md
+- hb002 regressed (0/5) in RERUN-5. Key pattern: agent bypasses blast_search tool and
+  calls blastn directly via bash — BE fix (empty-BLAST version message) does not fire.
+  Next step: review hb002_a2 trajectory; consider system-prompt rule requiring blast_search
+  over raw bash BLAST invocations.
 - Parallel-agent workflow note: when multiple agents touch AgentRun.__init__ in
   parallel branches, run the full suite after each merge — PR #58 referenced
-  `_final_answer_reprompted` without initialising it, which broke 4 tests until
-  PR #59 folded in the fix. Future post-mortem sessions should add a CI guard
-  that diffs the set of `self.*` references in `_loop` against assignments in `__init__`.
-- Next benchmark rerun: re-run the 5-problem preview comparison (RERUN protocol) with
-  --critic-injection-points after_final_answer after_critic_response --max-critic-rounds 2
-  to measure whether two-round critic + empty-BLAST disambiguation + FINAL ANSWER
-  enforcement raise Qwen3 pass@1 above 0% on the human-solvable subset.
+  `_final_answer_reprompted` without initialising it, broke 4 tests until PR #59 fixed it.
