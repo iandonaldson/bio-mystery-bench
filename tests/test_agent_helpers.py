@@ -6,8 +6,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from harness.agent import (
+    AgentRun,
     _extract_text,
     _format_result,
+    _get_blast_version,
     _handle_abort,
     _has_final_answer_marker,
     _summarize_blast_output,
@@ -647,14 +649,20 @@ def _blast_row(sseqid="NM_001234.1", pident="98.50", evalue="1e-120", bitscore="
 
 class TestSummarizeBlastOutput:
     def test_empty_string_returns_no_hits(self):
-        assert _summarize_blast_output("") == "No BLAST hits found."
+        result = _summarize_blast_output("")
+        assert "No hits at default parameters." in result
+        assert "Consider:" in result
 
     def test_whitespace_only_returns_no_hits(self):
-        assert _summarize_blast_output("   \n  ") == "No BLAST hits found."
+        result = _summarize_blast_output("   \n  ")
+        assert "No hits at default parameters." in result
+        assert "Consider:" in result
 
     def test_comment_only_lines_return_no_hits(self):
         inp = "# BLASTN 2.14.0\n# Fields: query id, subject id, ...\n"
-        assert _summarize_blast_output(inp) == "No BLAST hits found."
+        result = _summarize_blast_output(inp)
+        assert "No hits at default parameters." in result
+        assert "Consider:" in result
 
     def test_three_valid_rows_produce_header_and_three_data_lines(self):
         rows = "\n".join([_blast_row("Hit_A"), _blast_row("Hit_B"), _blast_row("Hit_C")])
@@ -689,6 +697,174 @@ class TestSummarizeBlastOutput:
         result = _summarize_blast_output(_blast_row(evalue="2e-50", bitscore="300"))
         assert "2e-50" in result
         assert "300" in result
+
+
+# ---------------------------------------------------------------------------
+# BLAST version cache + empty-summary disambiguation (BE-1..4)
+# ---------------------------------------------------------------------------
+
+class TestBlastVersionAndSummary:
+    def test_get_blast_version_returns_first_line_on_success(self):
+        container = MagicMock()
+        container.exec_command.return_value = ("blastn: 2.13.0+\nPackage: blast 2.13.0\n", "", 0)
+        assert _get_blast_version(container, "blastn") == "blastn: 2.13.0+"
+
+    def test_get_blast_version_returns_empty_on_rc_nonzero(self):
+        container = MagicMock()
+        container.exec_command.return_value = ("", "command not found", 1)
+        assert _get_blast_version(container, "blastn") == ""
+
+    def test_get_blast_version_handles_timeout(self):
+        container = MagicMock()
+        container.exec_command.side_effect = TimeoutError("timed out")
+        assert _get_blast_version(container, "blastn") == ""
+
+    def test_blast_versions_cache_initialised_empty(self):
+        run = AgentRun(
+            client=MagicMock(),
+            container=MagicMock(),
+            problem_question="q",
+            system_prompt="s",
+            config=MagicMock(),
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+        assert run._blast_versions == {}
+
+    def test_summarize_blast_empty_includes_version_when_provided(self):
+        result = _summarize_blast_output("", program="blastn", version="blastn: 2.13.0+")
+        assert "blastn installed (version blastn: 2.13.0+)" in result
+        assert "No hits at default parameters." in result
+        assert "Consider:" in result
+
+    def test_summarize_blast_empty_omits_version_when_blank(self):
+        result = _summarize_blast_output("", program="blastn", version="")
+        assert "installed (version" not in result
+        assert "No hits at default parameters." in result
+
+    def test_summarize_blast_non_empty_unchanged(self):
+        rows = "\n".join([
+            "q1\tHit_A\t99.0\t200\t3\t0\t1\t200\t10\t209\t1e-100\t400",
+            "q1\tHit_B\t98.5\t200\t3\t0\t1\t200\t10\t209\t2e-99\t395",
+            "q1\tHit_C\t97.0\t200\t3\t0\t1\t200\t10\t209\t3e-95\t380",
+        ])
+        result = _summarize_blast_output(rows, max_hits=10, program="blastn", version="blastn: 2.13.0+")
+        lines = result.splitlines()
+        assert lines[0].startswith("Hit ID")
+        assert lines[1].startswith("-")
+        assert "Hit_A" in result
+        assert "Hit_B" in result
+        assert "Hit_C" in result
+        assert "Consider:" not in result
+        assert "installed (version" not in result
+
+    # ---- Integration: BLAST dispatch wires the cache into the summary ----
+
+    def _make_blast_tool_call(self, call_id, program="blastn"):
+        from harness.llm import LLMToolCall
+        return LLMToolCall(
+            id=call_id,
+            name="blast_search",
+            input={
+                "query": "/workspace/scratch/q.fasta",
+                "database": "nt",
+                "program": program,
+                "max_hits": 5,
+            },
+        )
+
+    def _make_run_with_scripted_responses(self, responses, exec_side_effect):
+        from harness.llm import LLMResponse, LLMUsage
+        from harness.config import RunConfig
+
+        client = MagicMock()
+        client.chat.side_effect = [
+            LLMResponse(
+                stop_reason=r["stop_reason"],
+                text=r.get("text", ""),
+                tool_calls=r.get("tool_calls", []),
+                usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+                raw_content=r.get("raw_content", []),
+            )
+            for r in responses
+        ]
+
+        container = MagicMock()
+        container.exec_command.side_effect = exec_side_effect
+
+        config = RunConfig(max_steps=10, step_timeout_seconds=30, run_timeout_seconds=60)
+
+        run = AgentRun(
+            client=client,
+            container=container,
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+        return run, container
+
+    def test_blast_search_caches_version_per_program(self):
+        version_calls = []
+        blast_calls = []
+
+        def exec_side_effect(command, timeout=300):
+            if "-version" in command:
+                version_calls.append(command)
+                return ("blastn: 2.13.0+\n", "", 0)
+            if "-db" in command:
+                blast_calls.append(command)
+                return ("", "", 0)
+            return ("snapshot", "", 0)  # RESOURCE_CHECK_CMD
+
+        tc1 = self._make_blast_tool_call("tu_1")
+        tc2 = self._make_blast_tool_call("tu_2")
+        responses = [
+            {"stop_reason": "tool_use", "tool_calls": [tc1],
+             "raw_content": [{"type": "tool_use", "id": "tu_1", "name": "blast_search",
+                              "input": tc1.input}]},
+            {"stop_reason": "tool_use", "tool_calls": [tc2],
+             "raw_content": [{"type": "tool_use", "id": "tu_2", "name": "blast_search",
+                              "input": tc2.input}]},
+            {"stop_reason": "end_turn", "text": "done", "raw_content": []},
+        ]
+        run, _container = self._make_run_with_scripted_responses(responses, exec_side_effect)
+        run.run()
+        assert len(blast_calls) == 2
+        assert len(version_calls) == 1
+        assert run._blast_versions["blastn"] == "blastn: 2.13.0+"
+
+    def test_blast_search_empty_summary_includes_version_string(self):
+        def exec_side_effect(command, timeout=300):
+            if "-version" in command:
+                return ("blastn: 2.13.0+\n", "", 0)
+            if "-db" in command:
+                return ("", "", 0)  # empty BLAST result
+            return ("snapshot", "", 0)
+
+        tc = self._make_blast_tool_call("tu_x")
+        responses = [
+            {"stop_reason": "tool_use", "tool_calls": [tc],
+             "raw_content": [{"type": "tool_use", "id": "tu_x", "name": "blast_search",
+                              "input": tc.input}]},
+            {"stop_reason": "end_turn", "text": "done", "raw_content": []},
+        ]
+        run, _container = self._make_run_with_scripted_responses(responses, exec_side_effect)
+        run.run()
+
+        # The summary is appended to the second user message as a tool_result.
+        tool_result_msg = run.messages[-2]  # last assistant is end_turn; before that is tool_result
+        # Walk the messages to find the tool_result content
+        summary_text = ""
+        for msg in run.messages:
+            if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+                for block in msg["content"]:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        summary_text += str(block.get("content", ""))
+        assert "blastn" in summary_text
+        assert "Consider:" in summary_text
+        assert "blastn: 2.13.0+" in summary_text
 
 
 # ---------------------------------------------------------------------------

@@ -210,7 +210,7 @@ class AgentRun:
         self.output_tokens = 0
         self.cache_read_tokens = 0
         self._critic_rounds: int = 0
-        self._final_answer_reprompted: bool = False
+        self._blast_versions: dict[str, str] = {}
 
     def run(self) -> AgentResult:
         start = time.monotonic()
@@ -431,7 +431,16 @@ class AgentRun:
                         except Exception as e:
                             stdout, stderr, rc = "", str(e), -1
 
-                        summary = _summarize_blast_output(stdout, max_hits)
+                        if program not in self._blast_versions:
+                            self._blast_versions[program] = _get_blast_version(
+                                self.container, program
+                            )
+                        summary = _summarize_blast_output(
+                            stdout,
+                            max_hits,
+                            program=program,
+                            version=self._blast_versions[program],
+                        )
                         result_text = (
                             f"BLAST Summary ({program} vs {database}):\n{summary}\n\n"
                             f"Full results saved to {out_file}"
@@ -651,11 +660,46 @@ def _progress_footer(steps_used: int, max_steps: int, input_tokens: int) -> str:
     return footer
 
 
-def _summarize_blast_output(stdout: str, max_hits: int = 10) -> str:
-    """Parse BLAST tabular output (outfmt 6) into a compact summary table."""
+def _get_blast_version(container: Container, program: str) -> str:
+    """Run `<program> -version` in the container and return its first stdout line.
+
+    Returns "" on non-zero exit, timeout, or any other failure. Used to disambiguate
+    empty BLAST results from a missing binary (see L-12 in SKILLS/code_learnings.md).
+    """
+    try:
+        stdout, _stderr, rc = container.exec_command(f"{program} -version", timeout=5)
+    except TimeoutError:
+        return ""
+    except Exception:
+        return ""
+    if rc != 0:
+        return ""
+    first_line = stdout.strip().splitlines()[0] if stdout.strip() else ""
+    return first_line
+
+
+def _summarize_blast_output(
+    stdout: str,
+    max_hits: int = 10,
+    program: str = "blastn",
+    version: str = "",
+) -> str:
+    """Parse BLAST tabular output (outfmt 6) into a compact summary table.
+
+    When there are no hits, the summary explicitly confirms the program is
+    installed (citing `version` if provided) so the agent does not mistake an
+    empty result for a missing binary (see L-12).
+    """
     lines = [l for l in stdout.strip().splitlines() if l and not l.startswith("#")]
     if not lines:
-        return "No BLAST hits found."
+        installed_clause = f" {program} installed (version {version})." if version else ""
+        return (
+            f"No hits at default parameters.{installed_clause} "
+            "Anonymised sequences may not match nt/nr. "
+            "Consider: (a) -evalue 1, (b) shorter query, "
+            "(c) -task blastn-short for very short queries, "
+            "(d) different program (blastn↔blastx)."
+        )
     header = f"{'Hit ID':<45} {'Identity':>8} {'E-value':>12} {'Bitscore':>9}"
     sep = "-" * 76
     rows = [header, sep]
