@@ -1203,3 +1203,7 @@ class TestCriticPromptAlternatives:
         assert "Agent answer appears wrong on the evidence" in CRITIC_SYSTEM_PROMPT
         assert "may be correct but unverified" in CRITIC_SYSTEM_PROMPT
         assert "which assumption to verify" in CRITIC_SYSTEM_PROMPT
+
+    def test_critic_injection_wrapper_mentions_alternatives_testing(self):
+        result = _format_critic_injection("dummy")
+        assert "test the one with the strongest evidence support" in result

@@ -619,6 +619,8 @@ def _format_critic_injection(critique: str) -> str:
         "- If you agree with a concern, use bash to verify the assumption, then state "
         "your revised FINAL ANSWER.\n"
         "- If you disagree, briefly explain why and restate your original FINAL ANSWER.\n"
+        "- If the critic listed alternatives, test the one with the strongest evidence "
+        "support before restating your answer.\n"
         "You must end with: FINAL ANSWER: <answer>"
     )
 
