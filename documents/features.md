@@ -464,3 +464,70 @@ Sub-slices:
 - RERUN-2 ✅: Claude Sonnet benchmark run; results in `results/claude-sonnet-rerun/`
 - RERUN-3 ✅: Cerebras/Qwen3 benchmark run; results in `results/cerebras-qwen3-rerun/`
 - RERUN-4 ✅: `scripts/compare_runs.py` written; `claude-progress.txt` and `features.md` updated
+
+---
+
+## Qwen3 Post-Mortem Remediations (2026-05-22)
+
+Four feature groups implemented in parallel across three agents (A, B, C) after the
+2026-05-19 comparison run showed Qwen3 pass@1=0% on human-solvable problems.
+
+### ✅ CR2: Second Critic Exchange (CR2-1 to CR2-5, PR #57)
+
+Converts the single-round critic design into a two-round exchange. Round 1 (existing)
+identifies unverified HIGH-risk assumptions. Round 2 (new) audits whether the agent
+empirically tested those assumptions via tool calls, classifying each as `verified`,
+`verified-wrong`, or `unverified-verbal-only`.
+
+Sub-slices:
+- CR2-1 ✅: Replace `_critic_injected: bool` with `_critic_rounds: int` counter in `AgentRun.__init__`
+- CR2-2 ✅: Extend `harness/config.py` — add `"after_critic_response"` to `CRITIC_INJECTION_POINTS`
+  and `max_critic_rounds: int = 2` field to `RunConfig`
+- CR2-3 ✅: Add `CRITIC_FOLLOWUP_PROMPT` constant — asks critic to classify each prior HIGH-risk
+  assumption as verified / verified-wrong / unverified-verbal-only
+- CR2-4 ✅: Rewrite `_loop` end_turn critic block — `fire_critic` boolean encodes both injection
+  points and the `max_critic_rounds` cap; selects `CRITIC_FOLLOWUP_PROMPT` for rounds ≥ 1;
+  logs `round` field on every `critic` trajectory event
+- CR2-5 ✅: Add `--critic-injection-points after_critic_response` and `--max-critic-rounds N`
+  CLI flags in `scripts/run_eval.py`; wired into `RunConfig`
+
+### ✅ FA: FINAL ANSWER Marker Enforcement (FA-1 to FA-3, PR #58)
+
+Detects when an `end_turn` response lacks `FINAL ANSWER: <answer>`, re-prompts once,
+and if still missing logs a `format_warning` trajectory event and accepts. Prevents
+silent answer-extraction failures.
+
+Sub-slices:
+- FA-1 ✅: Add `_has_final_answer_marker(text: str) -> bool` helper using
+  `re.search(r"FINAL ANSWER:\s*\S", text)`
+- FA-2 ✅: Add `_final_answer_reprompted: bool = False` to `AgentRun.__init__`; inject
+  re-prompt message when marker absent on first `end_turn` (after critic block, before success)
+- FA-3 ✅: On second marker-absent `end_turn`, log `format_warning` with `reason` and
+  `text_excerpt`; fall through to `status="success"` rather than aborting
+
+### ✅ BE: Disambiguate Empty BLAST Results (BE-1 to BE-4, PR #56)
+
+When BLAST returns no hits, the summary previously said "No BLAST hits found", which
+the model could not distinguish from "BLAST is not installed." New behaviour explicitly
+confirms the tool is present and version-stamped, then lists four concrete alternatives.
+
+Sub-slices:
+- BE-1 ✅: Add `_get_blast_version(program)` helper — shells out to `<program> -version`,
+  parses version string
+- BE-2 ✅: Add `_blast_versions: dict[str, str] = {}` cache to `AgentRun.__init__`
+- BE-3 ✅: Update `_summarize_blast_output` — on empty result, call `_get_blast_version`
+  and emit "<program> installed (version …) — no hits returned. Alternatives: …"
+- BE-4 ✅: 9 new unit tests in `TestBlastVersionAndSummary`
+
+### ✅ CP: Critic Prompt Requires Concrete Alternatives (CP-1 to CP-3, PR #59)
+
+Strengthens the critic prompt: each HIGH-risk flag must include 1-2 alternative answers
+with citations, labelled (A) wrong-on-evidence or (B) unverified; `_format_critic_injection`
+asks the agent to test the strongest-evidence alternative. Also folds in a fix for a missing
+`_final_answer_reprompted = False` initialiser left out of FA (broken 4 tests on main).
+
+Sub-slices:
+- CP-1 ✅: Rewrite `CRITIC_SYSTEM_PROMPT` — mandatory alternatives + citation requirement
+- CP-2 ✅: Update `_format_critic_injection` — adds "test the strongest-evidence alternative" cue
+- CP-3 ✅: 3 new unit tests in `TestCriticPromptAlternatives`; fix missing `_final_answer_reprompted`
+  initialiser in `AgentRun.__init__` (regression guard: 4 previously-failing tests now pass)
