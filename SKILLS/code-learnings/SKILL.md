@@ -506,3 +506,113 @@ semantic surface area." When the surface is a single class, partition by attribu
 ownership *and* require each PR to keep that class internally consistent — references
 without initialisers are a defect, even if they sit on different lines from someone else's
 new field.
+
+---
+
+## L-22: A brief's COPY directives can outrun its build-context instructions — flag the gap, don't silently widen scope
+
+**Lesson (2026-05-22):** The GM brief (PR #60) told Agent A to add
+`COPY SKILLS/deg-functional-enrichment/SKILL.md /workspace/skills/...` to
+`docker/Dockerfile` *and* explicitly forbade touching `scripts/run_eval.py`,
+`README.md`, or any file outside a 6-item allow-list. But the `COPY SKILLS/...`
+paths only resolve when the Docker build context is the repo root — they fail with
+"SKILLS/...: not found" when the context is `docker/`, which is exactly what
+`run_eval.py:ensure_docker_image()` and the README quick-start pass. The brief
+itself referenced the old invocation (`docker build -t bio-mystery-bench:latest docker/`)
+in its own verification steps, so the contradiction was internal to the brief.
+
+The temptation was to "just fix" `ensure_docker_image()` to use repo-root context.
+That would have been correct technically but out of scope per the brief, and it would
+have created a downstream conflict for Agents B/C, who owned `run_eval.py`. The right
+call was:
+
+1. Implement the COPY directives literally as specified.
+2. Use the new build invocation (`-f docker/Dockerfile .` from repo root) for the
+   local verification rebuild only.
+3. Flag the latent bug explicitly in the PR body and in `claude-progress.txt` →
+   Next steps, with a one-line repro: the next `docker image inspect` failure will
+   trigger a build that errors out until `ensure_docker_image()` and the README are
+   updated.
+
+The cached image kept live runs working in the meantime, so the latent bug was
+bounded — not a regression, just a deferred fix.
+
+**Rule:** When a multi-agent brief constrains your file list, and you discover that
+its own instructions create a latent inconsistency in code you cannot touch, do **not**
+silently widen scope. Resolve in this order:
+
+1. Pause and ask the user before implementing — present the contradiction and the
+   resolution options. (Agent A did this for GM-5; the user confirmed the literal-
+   COPY-directives approach.)
+2. Implement the brief's formal directive (the COPY paths), not its colloquial
+   command (`docker build ... docker/`). Formal artefacts are unambiguous; commands
+   in prose are often shorthand.
+3. Verify locally using the corrected invocation.
+4. Document the gap in the PR body and in `claude-progress.txt` → Next steps as a
+   distinct, prioritised follow-up. If the gap is a latent bug (will break under
+   some specific condition), say what that condition is so the next agent can
+   triage urgency.
+
+**Detection:** When a brief lists allowed files but the work touches Docker build
+inputs, grep the codebase for every existing `docker build` invocation and confirm
+they are compatible with the new Dockerfile's COPY paths:
+
+```bash
+grep -rn "docker build\|dockerfile_dir\|build_image" scripts/ README.md harness/
+```
+
+If any invocation would break, that is the gap to flag.
+
+**Generalised lesson:** "Don't modify outside the allowed list" is a real constraint
+in multi-agent workflows — it protects the orchestration's conflict-avoidance plan.
+But it is the *agent's* responsibility to recognise when respecting the constraint
+creates a latent bug, and to make that bug visible to humans and to the next agent.
+Silent compliance + silent breakage is the worst outcome; loud compliance + flagged
+follow-up is the right one.
+
+---
+
+## L-23: Parallel agents adding test classes at a shared insertion site will conflict — concatenate, don't re-order
+
+**Lesson (2026-05-22):** During the parallel Qwen3 post-mortem, both Agent A (GM) and
+Agent C (CP) appended a new test class to `tests/test_agent_helpers.py` immediately
+after `TestBlastToolDefinition::test_extra_args_property_present` — the natural
+insertion point because it was the file's tail. Each PR was clean against its base.
+When Agent A's PR #60 was rebased onto main (after CP PR #59 had merged), git
+flagged a conflict in exactly those lines: both branches had inserted a new
+`# ---------------------------------------------------------------------------`
+header and a new class definition where the previous EOF had been.
+
+The conflict was trivial to resolve — both blocks should coexist; neither replaces
+the other. The agent kept Agent A's GM blocks first (already in the branch) and
+appended Agent C's `TestCriticPromptAlternatives` block after them. Tests went
+from 296 to 296 (one rebase commit, no test count change).
+
+**Rule:** In a multi-agent batch, parallel agents adding test classes to the same
+test file should expect a conflict at the shared insertion site (almost always EOF
+or a section boundary). When resolving:
+
+1. Both blocks coexist — neither side wins.
+2. Order doesn't matter functionally, so just concatenate in the order the conflict
+   shows them, with a single `# ---` separator between adjacent classes.
+3. Re-run the full suite immediately after resolving. The count should be the union
+   of both sides' new tests; if it's lower, a class was accidentally dropped during
+   marker removal.
+
+**Detection (proactive):** Before opening a parallel-agent PR, check whether other
+agents in the same batch are also adding to the same test file:
+
+```bash
+git log --oneline origin/main..HEAD -- tests/test_agent_helpers.py | head -5
+git log --oneline HEAD..origin/main -- tests/test_agent_helpers.py | head -5
+```
+
+If both show new commits, expect a conflict at rebase time. Pre-emptively merging
+main before pushing surfaces it earlier (and avoids a force-push to resolve).
+
+**Generalised lesson:** When parallel agents share a "natural" insertion point in
+a file (EOF, section end, last-of-its-kind class), the safe assumption is that
+they will all pick that same point. Brief authors can pre-empt this by assigning
+explicit insertion anchors per agent ("Agent A: after `TestBlastToolDefinition`,
+Agent C: before `TestExtractText`"), but in the absence of such guidance, expect
+the conflict and resolve it by stacking.

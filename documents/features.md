@@ -555,3 +555,56 @@ across CP-1 → CP-3):
   "If the critic listed alternatives, test the one with the strongest evidence support before
   restating your answer." Closes the CP-1 loop so the agent acts on alternatives rather than
   re-stating its original conclusion.
+
+### ✅ GM: General Method Advice + Reference SKILLs (GM-1 to GM-6, PR #60)
+
+Adds general bioinformatics methodology guidance to the harness system prompt and bakes two
+new versioned reference SKILLs into the Docker image at `/workspace/skills/`. Motivated by
+the Qwen3 2026-05-19 trajectories — the model attempted DEG functional interpretation by
+inspecting sequence composition rather than running enrichment against curated databases,
+and attempted ChIP-seq TF identification by manual k-mer counting on a hand-picked subset of
+peaks rather than scanning a motif database.
+
+Sub-slices (one commit each; 5 new unit tests split between `TestSystemPromptMethodAdvice`
+and `TestSkillFiles` in `tests/test_agent_helpers.py`):
+- GM-1 ✅: Append "Functional interpretation of gene lists" paragraph to `prompts/system.txt`
+  §6 (assumption checks) — recommends ORA / GSEA / GSVA against GO / MSigDB hallmarks /
+  KEGG / Reactome with Benjamini-Hochberg FDR; explicitly forbids inferring condition from
+  sequence composition. Points to `/workspace/skills/deg-functional-enrichment.md`.
+  Test: `test_system_prompt_advises_enrichment_for_deg_lists`.
+- GM-2 ✅: Append step 3c "TF identification from ChIP-seq peaks" to `prompts/system.txt`
+  §General approach — recommends `bedtools getfasta` on peak-flanking sequences (±100 bp)
+  plus PWM scanning via `pyjaspar` + `Bio.motifs` against JASPAR/HOCOMOCO. Forbids manual
+  k-mer counting as a substitute. Points to `/workspace/skills/chipseq-tf-identification.md`.
+  Test: `test_system_prompt_advises_motif_db_lookup_for_chipseq`.
+- GM-3 ✅: Create `SKILLS/deg-functional-enrichment/SKILL.md` — three copy-pasteable recipes:
+  (a) ORA via `gseapy.enrichr` (Enrichr API), (b) GSEA via `gseapy.prerank` against an MSigDB
+  GMT file, (c) ssGSEA (GSVA-equivalent) via `gseapy.ssgsea`. Includes an organism-to-
+  collection guide (Hallmark for human/mouse; KEGG/Reactome broader; GO species-agnostic)
+  and an install-on-demand note (`pip install gseapy`; not baked into image).
+  Test: `test_skill_file_deg_enrichment_has_frontmatter_and_three_recipes`.
+- GM-4 ✅: Create `SKILLS/chipseq-tf-identification/SKILL.md` — two copy-pasteable recipes:
+  (a) local PWM scan with `pyjaspar` + `Bio.motifs` on peak-flanking FASTA extracted via
+  `bedtools getfasta`, (b) JASPAR REST API query at `https://jaspar.genereg.net/api/v1/`.
+  Includes genome-assembly guidance (hg38 / mm10) and flank-width default (±100 bp around
+  summit). Install-on-demand note (`pip install pyjaspar`).
+  Test: `test_skill_file_chipseq_tf_id_has_frontmatter_and_two_recipes`.
+- GM-5 ✅: Add two `COPY SKILLS/.../SKILL.md /workspace/skills/<name>.md` directives to
+  `docker/Dockerfile`; update `COPY entrypoint.sh` to repo-root-relative `docker/entrypoint.sh`
+  to match the new build context. Extend `scripts/smoke_test_container.py` with two new
+  `test -f /workspace/skills/<name>.md && echo present` checks. Per brief, libraries
+  (`gseapy`, `pyjaspar`) are install-on-demand and NOT baked into the image — only the SKILL
+  markdown files are. Verified locally with `docker build -f docker/Dockerfile .` and
+  `python3 scripts/smoke_test_container.py` → 7/7 PASS.
+- GM-6 ✅: Append `/workspace/skills/` discovery note to `prompts/system.txt` Environment
+  details — instructs the agent to `ls /workspace/skills/` and `cat` recipes before
+  implementing the corresponding analysis. Without this the SKILLs baked by GM-5 would be
+  invisible unless the §3 or §6 advice happened to fire by full path.
+  Test: `test_system_prompt_mentions_workspace_skills_directory`.
+
+**Known follow-up (deferred from the GM PR's brief constraints):** the new `COPY SKILLS/...`
+paths require repo-root build context. `scripts/run_eval.py:ensure_docker_image()` still
+passes `dockerfile_dir` (= `docker/`) to `docker build`; `README.md` quick-start documents
+the same old context. Both need a one-line update to `-f docker/Dockerfile .` from repo root.
+The currently cached `bio-mystery-bench:latest` image keeps live runs working until the next
+cache-clear — see `claude-progress.txt` Next steps.
