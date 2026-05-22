@@ -193,7 +193,7 @@ class AgentRun:
         self.input_tokens = 0
         self.output_tokens = 0
         self.cache_read_tokens = 0
-        self._critic_injected = False
+        self._critic_rounds: int = 0
 
     def run(self) -> AgentResult:
         start = time.monotonic()
@@ -280,9 +280,9 @@ class AgentRun:
                 # Critic injection point: after_final_answer
                 if (
                     "after_final_answer" in self.config.critic_injection_points
-                    and not self._critic_injected
+                    and self._critic_rounds == 0
                 ):
-                    self._critic_injected = True
+                    self._critic_rounds += 1
                     critique = self._run_critic(response.text)
                     if critique:
                         self.logger.log("critic", {

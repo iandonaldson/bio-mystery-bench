@@ -694,6 +694,29 @@ class TestSummarizeBlastOutput:
 # BLAST_TOOL definition  (B-2)
 # ---------------------------------------------------------------------------
 
+class TestCriticMultiRound:
+    def _make_run(self, critic_injection_points=None, **config_kwargs):
+        from harness.agent import AgentRun
+        from harness.config import RunConfig
+        config = RunConfig(
+            critic_injection_points=list(critic_injection_points or []),
+            **config_kwargs,
+        )
+        return AgentRun(
+            client=MagicMock(),
+            container=MagicMock(),
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+
+    def test_critic_rounds_initialised_zero(self):
+        run = self._make_run()
+        assert run._critic_rounds == 0
+
+
 class TestBlastToolDefinition:
     def test_name_is_blast_search(self):
         assert BLAST_TOOL["name"] == "blast_search"
