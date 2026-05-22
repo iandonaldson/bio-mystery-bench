@@ -133,7 +133,31 @@ was made. Do not flag assumptions that were explicitly tested.
 Focus on the 2-3 most consequential unverified assumptions.
 
 At the end, state whether any HIGH-risk assumption would plausibly change the
-final answer if it turned out to be wrong.\
+final answer if it turned out to be wrong.
+
+For any HIGH-risk flag, list 1–2 alternative answers consistent with the
+trajectory's evidence. Cite the specific trajectory step that supports each
+alternative. Do not invent claims the agent did not make.
+
+Distinguish two outcomes — (A) Agent answer appears wrong on the evidence
+(list alternatives); (B) Agent answer may be correct but unverified (state
+which assumption to verify).\
+"""
+
+CRITIC_FOLLOWUP_PROMPT = """\
+You previously audited this agent's reasoning. The agent has now responded.
+Review the new tool calls and reasoning since your last critique.
+
+For each HIGH-risk assumption you flagged: (a) did the agent empirically test
+it via a tool call? Mark each as one of:
+- verified           — the agent ran a tool call that confirmed the assumption
+- verified-wrong     — the agent ran a tool call that contradicted the assumption
+- unverified-verbal-only — the agent only re-stated or argued, without testing
+
+If any HIGH-risk assumption remains unverified-verbal-only, list 1-2 alternative
+answers that would also be consistent with the evidence collected so far.
+
+Conclude with a one-line verdict: 'concerns resolved' or 'concerns remain'.\
 """
 
 # Commands run before the agent starts — logged and injected as environment context
@@ -193,7 +217,9 @@ class AgentRun:
         self.input_tokens = 0
         self.output_tokens = 0
         self.cache_read_tokens = 0
-        self._critic_injected = False
+        self._critic_rounds: int = 0
+        self._blast_versions: dict[str, str] = {}
+        self._final_answer_reprompted: bool = False
 
     def run(self) -> AgentResult:
         start = time.monotonic()
@@ -277,23 +303,57 @@ class AgentRun:
             self.steps += 1
 
             if response.stop_reason == "end_turn":
-                # Critic injection point: after_final_answer
-                if (
-                    "after_final_answer" in self.config.critic_injection_points
-                    and not self._critic_injected
-                ):
-                    self._critic_injected = True
-                    critique = self._run_critic(response.text)
+                # Critic injection points: after_final_answer (round 1) and
+                # after_critic_response (round 2+). Capped at max_critic_rounds.
+                cp = self.config.critic_injection_points
+                fire_critic = (
+                    self._critic_rounds < self.config.max_critic_rounds
+                    and (
+                        ("after_final_answer" in cp and self._critic_rounds == 0)
+                        or ("after_critic_response" in cp and self._critic_rounds >= 1)
+                    )
+                )
+                if fire_critic:
+                    system_prompt = (
+                        CRITIC_FOLLOWUP_PROMPT
+                        if self._critic_rounds >= 1
+                        else CRITIC_SYSTEM_PROMPT
+                    )
+                    self._critic_rounds += 1
+                    critique = self._run_critic(response.text, system_prompt=system_prompt)
                     if critique:
                         self.logger.log("critic", {
                             "model": self.config.critic_model or self.config.model,
                             "critique": critique,
+                            "round": self._critic_rounds,
                         })
                         self.messages.append({
                             "role": "user",
                             "content": _format_critic_injection(critique),
                         })
                         continue
+
+                # FINAL ANSWER marker enforcement: re-prompt once if missing;
+                # if still missing after the re-prompt, log a format_warning
+                # and accept the response.
+                if not _has_final_answer_marker(response.text):
+                    if not self._final_answer_reprompted:
+                        self._final_answer_reprompted = True
+                        self.messages.append({
+                            "role": "user",
+                            "content": [{
+                                "type": "text",
+                                "text": (
+                                    "Your previous response did not include a FINAL ANSWER: line. "
+                                    "Restate your conclusion as: FINAL ANSWER: <answer>"
+                                ),
+                            }],
+                        })
+                        continue
+                    self.logger.log("format_warning", {
+                        "reason": "FINAL ANSWER marker missing after re-prompt",
+                        "text_excerpt": response.text[:300],
+                    })
 
                 self.logger.log("status", {"status": "success", "final_message": response.text})
                 return AgentResult(
@@ -380,7 +440,16 @@ class AgentRun:
                         except Exception as e:
                             stdout, stderr, rc = "", str(e), -1
 
-                        summary = _summarize_blast_output(stdout, max_hits)
+                        if program not in self._blast_versions:
+                            self._blast_versions[program] = _get_blast_version(
+                                self.container, program
+                            )
+                        summary = _summarize_blast_output(
+                            stdout,
+                            max_hits,
+                            program=program,
+                            version=self._blast_versions[program],
+                        )
                         result_text = (
                             f"BLAST Summary ({program} vs {database}):\n{summary}\n\n"
                             f"Full results saved to {out_file}"
@@ -407,14 +476,14 @@ class AgentRun:
 
         return self._result("error", start)  # unreachable
 
-    def _run_critic(self, final_answer: str) -> str:
+    def _run_critic(self, final_answer: str, system_prompt: str = CRITIC_SYSTEM_PROMPT) -> str:
         """Call the critic model on the current trajectory. Returns critique text, or '' on error."""
         trajectory_text = self._format_trajectory_for_critic(final_answer)
         critic_model = self.config.critic_model or self.config.model
         try:
             response = self.critic_client.chat(
                 model=critic_model,
-                system=CRITIC_SYSTEM_PROMPT,
+                system=system_prompt,
                 messages=[{
                     "role": "user",
                     "content": f"Please audit the following agent trajectory:\n\n{trajectory_text}",
@@ -550,8 +619,15 @@ def _format_critic_injection(critique: str) -> str:
         "- If you agree with a concern, use bash to verify the assumption, then state "
         "your revised FINAL ANSWER.\n"
         "- If you disagree, briefly explain why and restate your original FINAL ANSWER.\n"
+        "- If the critic listed alternatives, test the one with the strongest evidence "
+        "support before restating your answer.\n"
         "You must end with: FINAL ANSWER: <answer>"
     )
+
+
+def _has_final_answer_marker(text: str) -> bool:
+    """Return True if `text` contains a 'FINAL ANSWER:' line followed by content."""
+    return bool(re.search(r"FINAL ANSWER:\s*\S", text))
 
 
 def _extract_text(content: Any) -> str:
@@ -595,11 +671,46 @@ def _progress_footer(steps_used: int, max_steps: int, input_tokens: int) -> str:
     return footer
 
 
-def _summarize_blast_output(stdout: str, max_hits: int = 10) -> str:
-    """Parse BLAST tabular output (outfmt 6) into a compact summary table."""
+def _get_blast_version(container: Container, program: str) -> str:
+    """Run `<program> -version` in the container and return its first stdout line.
+
+    Returns "" on non-zero exit, timeout, or any other failure. Used to disambiguate
+    empty BLAST results from a missing binary (see L-12 in SKILLS/code_learnings.md).
+    """
+    try:
+        stdout, _stderr, rc = container.exec_command(f"{program} -version", timeout=5)
+    except TimeoutError:
+        return ""
+    except Exception:
+        return ""
+    if rc != 0:
+        return ""
+    first_line = stdout.strip().splitlines()[0] if stdout.strip() else ""
+    return first_line
+
+
+def _summarize_blast_output(
+    stdout: str,
+    max_hits: int = 10,
+    program: str = "blastn",
+    version: str = "",
+) -> str:
+    """Parse BLAST tabular output (outfmt 6) into a compact summary table.
+
+    When there are no hits, the summary explicitly confirms the program is
+    installed (citing `version` if provided) so the agent does not mistake an
+    empty result for a missing binary (see L-12).
+    """
     lines = [l for l in stdout.strip().splitlines() if l and not l.startswith("#")]
     if not lines:
-        return "No BLAST hits found."
+        installed_clause = f" {program} installed (version {version})." if version else ""
+        return (
+            f"No hits at default parameters.{installed_clause} "
+            "Anonymised sequences may not match nt/nr. "
+            "Consider: (a) -evalue 1, (b) shorter query, "
+            "(c) -task blastn-short for very short queries, "
+            "(d) different program (blastn↔blastx)."
+        )
     header = f"{'Hit ID':<45} {'Identity':>8} {'E-value':>12} {'Bitscore':>9}"
     sep = "-" * 76
     rows = [header, sep]

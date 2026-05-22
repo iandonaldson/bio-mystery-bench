@@ -6,9 +6,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from harness.agent import (
+    AgentRun,
     _extract_text,
     _format_result,
+    _get_blast_version,
     _handle_abort,
+    _has_final_answer_marker,
     _summarize_blast_output,
     ResourceEstimate,
     AgentResult,
@@ -646,14 +649,20 @@ def _blast_row(sseqid="NM_001234.1", pident="98.50", evalue="1e-120", bitscore="
 
 class TestSummarizeBlastOutput:
     def test_empty_string_returns_no_hits(self):
-        assert _summarize_blast_output("") == "No BLAST hits found."
+        result = _summarize_blast_output("")
+        assert "No hits at default parameters." in result
+        assert "Consider:" in result
 
     def test_whitespace_only_returns_no_hits(self):
-        assert _summarize_blast_output("   \n  ") == "No BLAST hits found."
+        result = _summarize_blast_output("   \n  ")
+        assert "No hits at default parameters." in result
+        assert "Consider:" in result
 
     def test_comment_only_lines_return_no_hits(self):
         inp = "# BLASTN 2.14.0\n# Fields: query id, subject id, ...\n"
-        assert _summarize_blast_output(inp) == "No BLAST hits found."
+        result = _summarize_blast_output(inp)
+        assert "No hits at default parameters." in result
+        assert "Consider:" in result
 
     def test_three_valid_rows_produce_header_and_three_data_lines(self):
         rows = "\n".join([_blast_row("Hit_A"), _blast_row("Hit_B"), _blast_row("Hit_C")])
@@ -691,8 +700,466 @@ class TestSummarizeBlastOutput:
 
 
 # ---------------------------------------------------------------------------
+# BLAST version cache + empty-summary disambiguation (BE-1..4)
+# ---------------------------------------------------------------------------
+
+class TestBlastVersionAndSummary:
+    def test_get_blast_version_returns_first_line_on_success(self):
+        container = MagicMock()
+        container.exec_command.return_value = ("blastn: 2.13.0+\nPackage: blast 2.13.0\n", "", 0)
+        assert _get_blast_version(container, "blastn") == "blastn: 2.13.0+"
+
+    def test_get_blast_version_returns_empty_on_rc_nonzero(self):
+        container = MagicMock()
+        container.exec_command.return_value = ("", "command not found", 1)
+        assert _get_blast_version(container, "blastn") == ""
+
+    def test_get_blast_version_handles_timeout(self):
+        container = MagicMock()
+        container.exec_command.side_effect = TimeoutError("timed out")
+        assert _get_blast_version(container, "blastn") == ""
+
+    def test_blast_versions_cache_initialised_empty(self):
+        run = AgentRun(
+            client=MagicMock(),
+            container=MagicMock(),
+            problem_question="q",
+            system_prompt="s",
+            config=MagicMock(),
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+        assert run._blast_versions == {}
+
+    def test_summarize_blast_empty_includes_version_when_provided(self):
+        result = _summarize_blast_output("", program="blastn", version="blastn: 2.13.0+")
+        assert "blastn installed (version blastn: 2.13.0+)" in result
+        assert "No hits at default parameters." in result
+        assert "Consider:" in result
+
+    def test_summarize_blast_empty_omits_version_when_blank(self):
+        result = _summarize_blast_output("", program="blastn", version="")
+        assert "installed (version" not in result
+        assert "No hits at default parameters." in result
+
+    def test_summarize_blast_non_empty_unchanged(self):
+        rows = "\n".join([
+            "q1\tHit_A\t99.0\t200\t3\t0\t1\t200\t10\t209\t1e-100\t400",
+            "q1\tHit_B\t98.5\t200\t3\t0\t1\t200\t10\t209\t2e-99\t395",
+            "q1\tHit_C\t97.0\t200\t3\t0\t1\t200\t10\t209\t3e-95\t380",
+        ])
+        result = _summarize_blast_output(rows, max_hits=10, program="blastn", version="blastn: 2.13.0+")
+        lines = result.splitlines()
+        assert lines[0].startswith("Hit ID")
+        assert lines[1].startswith("-")
+        assert "Hit_A" in result
+        assert "Hit_B" in result
+        assert "Hit_C" in result
+        assert "Consider:" not in result
+        assert "installed (version" not in result
+
+    # ---- Integration: BLAST dispatch wires the cache into the summary ----
+
+    def _make_blast_tool_call(self, call_id, program="blastn"):
+        from harness.llm import LLMToolCall
+        return LLMToolCall(
+            id=call_id,
+            name="blast_search",
+            input={
+                "query": "/workspace/scratch/q.fasta",
+                "database": "nt",
+                "program": program,
+                "max_hits": 5,
+            },
+        )
+
+    def _make_run_with_scripted_responses(self, responses, exec_side_effect):
+        from harness.llm import LLMResponse, LLMUsage
+        from harness.config import RunConfig
+
+        client = MagicMock()
+        client.chat.side_effect = [
+            LLMResponse(
+                stop_reason=r["stop_reason"],
+                text=r.get("text", ""),
+                tool_calls=r.get("tool_calls", []),
+                usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+                raw_content=r.get("raw_content", []),
+            )
+            for r in responses
+        ]
+
+        container = MagicMock()
+        container.exec_command.side_effect = exec_side_effect
+
+        config = RunConfig(max_steps=10, step_timeout_seconds=30, run_timeout_seconds=60)
+
+        run = AgentRun(
+            client=client,
+            container=container,
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+        return run, container
+
+    def test_blast_search_caches_version_per_program(self):
+        version_calls = []
+        blast_calls = []
+
+        def exec_side_effect(command, timeout=300):
+            if "-version" in command:
+                version_calls.append(command)
+                return ("blastn: 2.13.0+\n", "", 0)
+            if "-db" in command:
+                blast_calls.append(command)
+                return ("", "", 0)
+            return ("snapshot", "", 0)  # RESOURCE_CHECK_CMD
+
+        tc1 = self._make_blast_tool_call("tu_1")
+        tc2 = self._make_blast_tool_call("tu_2")
+        responses = [
+            {"stop_reason": "tool_use", "tool_calls": [tc1],
+             "raw_content": [{"type": "tool_use", "id": "tu_1", "name": "blast_search",
+                              "input": tc1.input}]},
+            {"stop_reason": "tool_use", "tool_calls": [tc2],
+             "raw_content": [{"type": "tool_use", "id": "tu_2", "name": "blast_search",
+                              "input": tc2.input}]},
+            {"stop_reason": "end_turn", "text": "done", "raw_content": []},
+        ]
+        run, _container = self._make_run_with_scripted_responses(responses, exec_side_effect)
+        run.run()
+        assert len(blast_calls) == 2
+        assert len(version_calls) == 1
+        assert run._blast_versions["blastn"] == "blastn: 2.13.0+"
+
+    def test_blast_search_empty_summary_includes_version_string(self):
+        def exec_side_effect(command, timeout=300):
+            if "-version" in command:
+                return ("blastn: 2.13.0+\n", "", 0)
+            if "-db" in command:
+                return ("", "", 0)  # empty BLAST result
+            return ("snapshot", "", 0)
+
+        tc = self._make_blast_tool_call("tu_x")
+        responses = [
+            {"stop_reason": "tool_use", "tool_calls": [tc],
+             "raw_content": [{"type": "tool_use", "id": "tu_x", "name": "blast_search",
+                              "input": tc.input}]},
+            {"stop_reason": "end_turn", "text": "done", "raw_content": []},
+        ]
+        run, _container = self._make_run_with_scripted_responses(responses, exec_side_effect)
+        run.run()
+
+        # The summary is appended to the second user message as a tool_result.
+        tool_result_msg = run.messages[-2]  # last assistant is end_turn; before that is tool_result
+        # Walk the messages to find the tool_result content
+        summary_text = ""
+        for msg in run.messages:
+            if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+                for block in msg["content"]:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        summary_text += str(block.get("content", ""))
+        assert "blastn" in summary_text
+        assert "Consider:" in summary_text
+        assert "blastn: 2.13.0+" in summary_text
+
+
+# ---------------------------------------------------------------------------
 # BLAST_TOOL definition  (B-2)
 # ---------------------------------------------------------------------------
+
+class TestCriticMultiRound:
+    def _make_run(self, critic_injection_points=None, **config_kwargs):
+        from harness.agent import AgentRun
+        from harness.config import RunConfig
+        config = RunConfig(
+            critic_injection_points=list(critic_injection_points or []),
+            **config_kwargs,
+        )
+        return AgentRun(
+            client=MagicMock(),
+            container=MagicMock(),
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+
+    def test_critic_rounds_initialised_zero(self):
+        run = self._make_run()
+        assert run._critic_rounds == 0
+
+    def test_config_critic_injection_points_includes_after_critic_response(self):
+        from harness.config import CRITIC_INJECTION_POINTS
+        assert "after_critic_response" in CRITIC_INJECTION_POINTS
+
+    def test_config_max_critic_rounds_default_two(self):
+        from harness.config import RunConfig
+        assert RunConfig().max_critic_rounds == 2
+
+    def test_critic_followup_prompt_exists_and_mentions_verification(self):
+        from harness.agent import CRITIC_FOLLOWUP_PROMPT
+        assert "verified" in CRITIC_FOLLOWUP_PROMPT
+        assert "verified-wrong" in CRITIC_FOLLOWUP_PROMPT
+        assert "unverified-verbal-only" in CRITIC_FOLLOWUP_PROMPT
+
+    def _llm_response(self, text="answer text"):
+        from harness.llm import LLMResponse, LLMUsage
+        return LLMResponse(
+            stop_reason="end_turn",
+            text=text,
+            tool_calls=[],
+            usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+            raw_content=[{"type": "text", "text": text}],
+        )
+
+    def _run_with_mocks(self, critic_injection_points, max_critic_rounds,
+                        n_agent_responses, n_critic_responses):
+        from harness.agent import AgentRun
+        from harness.config import RunConfig
+
+        client = MagicMock()
+        client.chat.side_effect = [
+            self._llm_response(f"FINAL ANSWER: answer{i}") for i in range(n_agent_responses)
+        ]
+        critic_client = MagicMock()
+        critic_client.chat.side_effect = [
+            self._llm_response(f"critique{i}") for i in range(n_critic_responses)
+        ]
+        container = MagicMock()
+        container.exec_command.return_value = ("env-snapshot", "", 0)
+        logger = MagicMock()
+        cost_tracker = MagicMock()
+
+        config = RunConfig(
+            critic_injection_points=list(critic_injection_points),
+            max_critic_rounds=max_critic_rounds,
+        )
+        run = AgentRun(
+            client=client,
+            container=container,
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=logger,
+            cost_tracker=cost_tracker,
+            critic_client=critic_client,
+        )
+        result = run.run()
+        return run, result, client, critic_client, logger
+
+    def test_runs_second_critic_when_after_critic_response_enabled(self):
+        _, result, client, critic_client, logger = self._run_with_mocks(
+            critic_injection_points=["after_final_answer", "after_critic_response"],
+            max_critic_rounds=2,
+            n_agent_responses=3,
+            n_critic_responses=2,
+        )
+        assert result.status == "success"
+        critic_calls = [c for c in logger.log.call_args_list if c.args[0] == "critic"]
+        assert len(critic_calls) == 2
+        assert critic_calls[0].args[1]["round"] == 1
+        assert critic_calls[1].args[1]["round"] == 2
+
+    def test_second_critic_uses_followup_prompt(self):
+        from harness.agent import CRITIC_FOLLOWUP_PROMPT, CRITIC_SYSTEM_PROMPT
+        _, _, _, critic_client, _ = self._run_with_mocks(
+            critic_injection_points=["after_final_answer", "after_critic_response"],
+            max_critic_rounds=2,
+            n_agent_responses=3,
+            n_critic_responses=2,
+        )
+        # First critic call uses CRITIC_SYSTEM_PROMPT; second uses CRITIC_FOLLOWUP_PROMPT.
+        first_kwargs = critic_client.chat.call_args_list[0].kwargs
+        second_kwargs = critic_client.chat.call_args_list[1].kwargs
+        assert first_kwargs["system"] == CRITIC_SYSTEM_PROMPT
+        assert second_kwargs["system"] == CRITIC_FOLLOWUP_PROMPT
+
+    def test_caps_at_max_critic_rounds(self):
+        # Even with both injection points enabled, exactly max_critic_rounds critic events fire.
+        run, result, _, critic_client, logger = self._run_with_mocks(
+            critic_injection_points=["after_final_answer", "after_critic_response"],
+            max_critic_rounds=2,
+            n_agent_responses=3,
+            n_critic_responses=2,
+        )
+        critic_calls = [c for c in logger.log.call_args_list if c.args[0] == "critic"]
+        assert len(critic_calls) == 2
+        assert critic_client.chat.call_count == 2
+        assert run._critic_rounds == 2
+
+    def test_skips_second_critic_when_not_in_injection_points(self):
+        _, result, _, critic_client, logger = self._run_with_mocks(
+            critic_injection_points=["after_final_answer"],
+            max_critic_rounds=2,
+            n_agent_responses=2,
+            n_critic_responses=1,
+        )
+        assert result.status == "success"
+        critic_calls = [c for c in logger.log.call_args_list if c.args[0] == "critic"]
+        assert len(critic_calls) == 1
+        assert critic_calls[0].args[1]["round"] == 1
+        assert critic_client.chat.call_count == 1
+
+
+class TestFinalAnswerMarker:
+    def test_marker_present_returns_true(self):
+        assert _has_final_answer_marker("Reasoning here. FINAL ANSWER: 42") is True
+
+    def test_marker_missing_returns_false(self):
+        assert _has_final_answer_marker("The answer is probably 42.") is False
+
+    def test_marker_with_only_whitespace_after_returns_false(self):
+        assert _has_final_answer_marker("FINAL ANSWER:   ") is False
+        assert _has_final_answer_marker("FINAL ANSWER:\n\n") is False
+
+    def test_marker_mid_text_returns_true(self):
+        text = "Some preamble.\nFINAL ANSWER: Bacillus licheniformis\nTrailing notes."
+        assert _has_final_answer_marker(text) is True
+
+
+class TestFinalAnswerReprompt:
+    def _llm_response(self, text):
+        from harness.llm import LLMResponse, LLMUsage
+        return LLMResponse(
+            stop_reason="end_turn",
+            text=text,
+            tool_calls=[],
+            usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+            raw_content=[{"type": "text", "text": text}],
+        )
+
+    def _run(self, agent_texts):
+        from harness.agent import AgentRun
+        from harness.config import RunConfig
+
+        client = MagicMock()
+        client.chat.side_effect = [self._llm_response(t) for t in agent_texts]
+        container = MagicMock()
+        container.exec_command.return_value = ("env", "", 0)
+        logger = MagicMock()
+        cost_tracker = MagicMock()
+
+        config = RunConfig()  # no critic
+        run = AgentRun(
+            client=client,
+            container=container,
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=logger,
+            cost_tracker=cost_tracker,
+        )
+        result = run.run()
+        return run, result, client, logger
+
+    def test_reprompts_once_when_marker_missing(self):
+        first_text = "I think the answer is 42 but I'm not stating it formally."
+        second_text = "FINAL ANSWER: 42"
+        run, result, client, logger = self._run([first_text, second_text])
+
+        # (a) two end_turn cycles consumed
+        assert client.chat.call_count == 2
+
+        # (b) one re-prompt user message in self.messages
+        reprompt_msgs = [
+            m for m in run.messages
+            if m.get("role") == "user"
+            and isinstance(m.get("content"), list)
+            and any(
+                isinstance(b, dict)
+                and b.get("type") == "text"
+                and "did not include a FINAL ANSWER" in b.get("text", "")
+                for b in m["content"]
+            )
+        ]
+        assert len(reprompt_msgs) == 1
+
+        # (c) result.final_message contains "FINAL ANSWER"
+        assert "FINAL ANSWER" in result.final_message
+        assert result.status == "success"
+
+    def test_accepts_after_one_reprompt_with_format_warning(self):
+        # Both responses lack the marker — after one re-prompt, accept and warn.
+        run, result, client, logger = self._run([
+            "Answer is probably 42, no formal marker.",
+            "Still no marker on this attempt either.",
+        ])
+        assert client.chat.call_count == 2
+
+        reprompt_msgs = [
+            m for m in run.messages
+            if m.get("role") == "user"
+            and isinstance(m.get("content"), list)
+            and any(
+                isinstance(b, dict)
+                and b.get("type") == "text"
+                and "did not include a FINAL ANSWER" in b.get("text", "")
+                for b in m["content"]
+            )
+        ]
+        assert len(reprompt_msgs) == 1
+
+        warning_calls = [c for c in logger.log.call_args_list if c.args[0] == "format_warning"]
+        assert len(warning_calls) == 1
+        assert "FINAL ANSWER marker missing" in warning_calls[0].args[1]["reason"]
+        assert result.status == "success"
+
+
+class TestRunEvalCriticFlags:
+    """CLI wiring for the second critic flags (CR2-5)."""
+
+    def _invoke(self, args):
+        """Invoke scripts/run_eval main, intercepting RunConfig to capture kwargs.
+
+        load_problems is patched to return [], so the CLI exits with code 1
+        after the config is constructed — that's exactly the seam we want.
+        """
+        from click.testing import CliRunner
+        from unittest.mock import patch
+        import sys
+        from pathlib import Path
+
+        scripts_path = str(Path(__file__).resolve().parent.parent / "scripts")
+        if scripts_path not in sys.path:
+            sys.path.insert(0, scripts_path)
+
+        from scripts.run_eval import main
+        from harness.config import RunConfig
+
+        captured = {}
+
+        def capture(*ca, **ck):
+            captured.update(ck)
+            return RunConfig(*ca, **ck)
+
+        runner = CliRunner()
+        with patch("scripts.run_eval.RunConfig", side_effect=capture):
+            with patch("scripts.run_eval.load_problems", return_value=[]):
+                result = runner.invoke(main, args, catch_exceptions=False)
+        return captured, result
+
+    def test_run_eval_parses_max_critic_rounds_flag(self):
+        captured, _ = self._invoke(["--max-critic-rounds", "3"])
+        assert captured.get("max_critic_rounds") == 3
+
+    def test_run_eval_max_critic_rounds_default_two(self):
+        captured, _ = self._invoke([])
+        assert captured.get("max_critic_rounds") == 2
+
+    def test_run_eval_accepts_after_critic_response(self):
+        captured, _ = self._invoke([
+            "--critic-injection-points", "after_final_answer",
+            "--critic-injection-points", "after_critic_response",
+        ])
+        cp = captured.get("critic_injection_points")
+        assert "after_final_answer" in cp
+        assert "after_critic_response" in cp
+
 
 class TestBlastToolDefinition:
     def test_name_is_blast_search(self):
@@ -818,3 +1285,25 @@ class TestSkillFiles:
         assert "mm10" in body
         # Install-on-demand note must be present (no pre-install in Docker).
         assert "pip install pyjaspar" in body
+
+
+# ---------------------------------------------------------------------------
+# Critic prompt: require concrete alternatives (CP-1..3)
+# ---------------------------------------------------------------------------
+
+from harness.agent import CRITIC_SYSTEM_PROMPT, _format_critic_injection
+
+
+class TestCriticPromptAlternatives:
+    def test_critic_system_prompt_requires_alternatives_with_evidence(self):
+        assert "1–2 alternative answers" in CRITIC_SYSTEM_PROMPT
+        assert "Cite the specific trajectory step" in CRITIC_SYSTEM_PROMPT
+
+    def test_critic_system_prompt_distinguishes_wrong_vs_unverified(self):
+        assert "Agent answer appears wrong on the evidence" in CRITIC_SYSTEM_PROMPT
+        assert "may be correct but unverified" in CRITIC_SYSTEM_PROMPT
+        assert "which assumption to verify" in CRITIC_SYSTEM_PROMPT
+
+    def test_critic_injection_wrapper_mentions_alternatives_testing(self):
+        result = _format_critic_injection("dummy")
+        assert "test the one with the strongest evidence support" in result

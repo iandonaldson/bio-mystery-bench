@@ -282,14 +282,16 @@ def _run_problem(
 @click.option("--dataset-path", default=None,
               help="Path to a local JSONL manifest file (overrides --dataset).")
 @click.option("--critic-injection-points", multiple=True,
-              type=click.Choice(["after_final_answer"]),
-              help="Inject critic at this point (repeatable). E.g. --critic-injection-points after_final_answer")
+              type=click.Choice(["after_final_answer", "after_critic_response"]),
+              help="Inject critic at this point (repeatable). E.g. --critic-injection-points after_final_answer --critic-injection-points after_critic_response")
 @click.option("--critic-model", default="",
               help="Model for the critic (default: same as agent model).")
+@click.option("--max-critic-rounds", default=2, show_default=True, type=int,
+              help="Maximum number of critic exchanges per run.")
 def main(dataset, model, provider, api_base_url, api_key, judge_model,
          n_attempts, parallel, problem_ids, dry_run, resume, max_cost, max_steps,
          docker_memory, docker_cpus, results_dir, no_build, dataset_path,
-         critic_injection_points, critic_model):
+         critic_injection_points, critic_model, max_critic_rounds):
     """Run BioMysteryBench evaluation harness."""
 
     config = RunConfig(
@@ -305,6 +307,7 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         docker_cpus=docker_cpus,
         critic_injection_points=list(critic_injection_points),
         critic_model=critic_model,
+        max_critic_rounds=max_critic_rounds,
     )
 
     # Auto-resolve base URL for providers with a known default endpoint
