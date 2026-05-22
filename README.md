@@ -23,7 +23,7 @@ pip install -e .
 ### 3. Build the Docker sandbox image
 
 ```bash
-docker build -t bio-mystery-bench:latest ./docker/
+docker build -t bio-mystery-bench:latest -f docker/Dockerfile .
 # First build takes 10–20 minutes and produces a ~4 GB image
 ```
 

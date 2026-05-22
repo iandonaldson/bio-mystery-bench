@@ -112,7 +112,11 @@ def ensure_docker_image(image_name: str, dockerfile_dir: Path) -> None:
     if result.returncode != 0:
         console.print(f"[yellow]Docker image {image_name} not found. Building...[/yellow]")
         subprocess.run(
-            ["docker", "build", "-t", image_name, str(dockerfile_dir)],
+            [
+                "docker", "build", "-t", image_name,
+                "-f", str(dockerfile_dir / "Dockerfile"),
+                str(dockerfile_dir.parent),
+            ],
             check=True,
         )
         console.print(f"[green]Image {image_name} built successfully.[/green]")
