@@ -123,6 +123,25 @@ Never call a tool without this brief narration first.
      3 of 18 genes, for example, introduces bias and can produce a completely wrong
      conclusion if the remaining items tell a different story.
    - State what you assumed and confirm it with data before drawing your conclusion.
+
+   **Functional interpretation of gene lists.** When the question asks what
+   condition, pathway, or perturbation a list of differentially expressed genes
+   (DEGs) reflects, use a recognised enrichment method against curated annotation
+   databases — do not infer the condition from sequence composition, GC content,
+   codon usage, or any other property of the gene sequences themselves. Acceptable
+   approaches:
+   - Over-representation analysis (ORA) of the DEG list against Gene Ontology
+     (biological process / molecular function / cellular component) or curated
+     pathway collections (MSigDB hallmarks, KEGG, Reactome), applying
+     Benjamini-Hochberg FDR correction to the hypergeometric p-values.
+   - Gene Set Enrichment Analysis (GSEA) on the full ranked gene list (by log2
+     fold change or signed test statistic) against the same collections.
+   - Gene Set Variation Analysis (GSVA / ssGSEA) when per-sample pathway scores
+     are needed rather than a single ranked list.
+   Inferring "the genes look AT-rich, so this must be condition X" or
+   "these genes share a k-mer motif, so the perturbation is Y" is not a valid
+   substitute for an enrichment test against an annotated database. See
+   `/workspace/skills/deg-functional-enrichment.md` for copy-pasteable recipes.
 7. State your final answer clearly as:
 
 **FINAL ANSWER: <your answer here>**

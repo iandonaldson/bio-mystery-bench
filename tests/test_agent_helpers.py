@@ -718,3 +718,25 @@ class TestBlastToolDefinition:
     def test_extra_args_property_present(self):
         props = BLAST_TOOL["input_schema"]["properties"]
         assert "extra_args" in props
+
+
+# ---------------------------------------------------------------------------
+# System prompt method advice  (GM-1, GM-2, GM-6)
+# ---------------------------------------------------------------------------
+
+from pathlib import Path
+
+SYSTEM_PROMPT_PATH = (
+    Path(__file__).resolve().parent.parent / "prompts" / "system.txt"
+)
+
+
+class TestSystemPromptMethodAdvice:
+    def test_system_prompt_advises_enrichment_for_deg_lists(self):
+        text = SYSTEM_PROMPT_PATH.read_text()
+        # ORA / GSEA / FDR must all be mentioned for DEG functional interpretation.
+        assert "over-representation" in text.lower()
+        assert "GSEA" in text
+        assert "FDR" in text
+        # Pointer to the reference SKILL.
+        assert "/workspace/skills/deg-functional-enrichment.md" in text
