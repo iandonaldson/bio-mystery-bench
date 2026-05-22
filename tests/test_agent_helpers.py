@@ -716,6 +716,14 @@ class TestCriticMultiRound:
         run = self._make_run()
         assert run._critic_rounds == 0
 
+    def test_config_critic_injection_points_includes_after_critic_response(self):
+        from harness.config import CRITIC_INJECTION_POINTS
+        assert "after_critic_response" in CRITIC_INJECTION_POINTS
+
+    def test_config_max_critic_rounds_default_two(self):
+        from harness.config import RunConfig
+        assert RunConfig().max_critic_rounds == 2
+
 
 class TestBlastToolDefinition:
     def test_name_is_blast_search(self):
