@@ -827,6 +827,57 @@ class TestCriticMultiRound:
         assert critic_client.chat.call_count == 1
 
 
+class TestRunEvalCriticFlags:
+    """CLI wiring for the second critic flags (CR2-5)."""
+
+    def _invoke(self, args):
+        """Invoke scripts/run_eval main, intercepting RunConfig to capture kwargs.
+
+        load_problems is patched to return [], so the CLI exits with code 1
+        after the config is constructed — that's exactly the seam we want.
+        """
+        from click.testing import CliRunner
+        from unittest.mock import patch
+        import sys
+        from pathlib import Path
+
+        scripts_path = str(Path(__file__).resolve().parent.parent / "scripts")
+        if scripts_path not in sys.path:
+            sys.path.insert(0, scripts_path)
+
+        from scripts.run_eval import main
+        from harness.config import RunConfig
+
+        captured = {}
+
+        def capture(*ca, **ck):
+            captured.update(ck)
+            return RunConfig(*ca, **ck)
+
+        runner = CliRunner()
+        with patch("scripts.run_eval.RunConfig", side_effect=capture):
+            with patch("scripts.run_eval.load_problems", return_value=[]):
+                result = runner.invoke(main, args, catch_exceptions=False)
+        return captured, result
+
+    def test_run_eval_parses_max_critic_rounds_flag(self):
+        captured, _ = self._invoke(["--max-critic-rounds", "3"])
+        assert captured.get("max_critic_rounds") == 3
+
+    def test_run_eval_max_critic_rounds_default_two(self):
+        captured, _ = self._invoke([])
+        assert captured.get("max_critic_rounds") == 2
+
+    def test_run_eval_accepts_after_critic_response(self):
+        captured, _ = self._invoke([
+            "--critic-injection-points", "after_final_answer",
+            "--critic-injection-points", "after_critic_response",
+        ])
+        cp = captured.get("critic_injection_points")
+        assert "after_final_answer" in cp
+        assert "after_critic_response" in cp
+
+
 class TestBlastToolDefinition:
     def test_name_is_blast_search(self):
         assert BLAST_TOOL["name"] == "blast_search"
