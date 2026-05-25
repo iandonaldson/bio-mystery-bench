@@ -974,10 +974,11 @@ class TestCriticMultiRound:
             n_critic_responses=2,
         )
         # First critic call uses CRITIC_SYSTEM_PROMPT; second uses CRITIC_FOLLOWUP_PROMPT.
+        # CA-3: _load_critic_skill() is appended to the system prompt, so check startswith.
         first_kwargs = critic_client.chat.call_args_list[0].kwargs
         second_kwargs = critic_client.chat.call_args_list[1].kwargs
-        assert first_kwargs["system"] == CRITIC_SYSTEM_PROMPT
-        assert second_kwargs["system"] == CRITIC_FOLLOWUP_PROMPT
+        assert first_kwargs["system"].startswith(CRITIC_SYSTEM_PROMPT)
+        assert second_kwargs["system"].startswith(CRITIC_FOLLOWUP_PROMPT)
 
     def test_caps_at_max_critic_rounds(self):
         # Even with both injection points enabled, exactly max_critic_rounds critic events fire.
@@ -1651,3 +1652,153 @@ class TestSystemPromptGenomeAndBlastPointers:
 
     def test_system_prompt_mentions_blast_search_skill(self):
         assert "blast-search" in self._prompt()
+
+
+# ---------------------------------------------------------------------------
+# CA: Critic Accuracy Improvements (CA-1 to CA-4)
+# ---------------------------------------------------------------------------
+
+from harness.agent import CRITIC_SYSTEM_PROMPT, CRITIC_FOLLOWUP_PROMPT
+
+
+class TestCriticCitationGate:
+    """CA-1: CRITIC_SYSTEM_PROMPT contains the CITATION GATE block."""
+
+    def test_critic_system_prompt_requires_step_citation(self):
+        assert "Step N" in CRITIC_SYSTEM_PROMPT
+        assert "do not raise" in CRITIC_SYSTEM_PROMPT.lower()
+
+    def test_critic_system_prompt_citation_gate_before_numbered_list(self):
+        """Gate must appear before the numbered assumption list so it applies first."""
+        gate_pos = CRITIC_SYSTEM_PROMPT.find("CITATION GATE")
+        numbered_pos = CRITIC_SYSTEM_PROMPT.find("1. State the assumption")
+        assert gate_pos != -1
+        assert gate_pos < numbered_pos
+
+    def test_critic_system_prompt_weak_do_not_invent_line_removed(self):
+        """Standalone 'Do not invent claims' line replaced by the CITATION GATE."""
+        # The weak standalone line should be gone; CITATION GATE covers this.
+        assert "Do not invent claims the agent did not make." not in CRITIC_SYSTEM_PROMPT
+
+
+class TestCriticFollowupCitationGate:
+    """CA-4: CRITIC_FOLLOWUP_PROMPT contains its own CITATION GATE."""
+
+    def test_critic_followup_prompt_requires_citation(self):
+        assert "CITATION GATE" in CRITIC_FOLLOWUP_PROMPT
+        assert "Step N" in CRITIC_FOLLOWUP_PROMPT
+
+    def test_critic_followup_gate_covers_new_concerns_only(self):
+        assert "NEW concern" in CRITIC_FOLLOWUP_PROMPT
+
+
+class TestCriticTruncationLimits:
+    """CA-2: _format_trajectory_for_critic uses new truncation limits."""
+
+    def _make_run(self):
+        from harness.config import RunConfig
+        run = AgentRun.__new__(AgentRun)
+        run.messages = []
+        run.config = RunConfig()
+        return run
+
+    def test_format_trajectory_reasoning_limit_is_1500(self):
+        """AGENT REASONING blocks use [:1500], not [:400]."""
+        run = self._make_run()
+        long_text = "x" * 2000
+        run.messages = [
+            {"role": "assistant",
+             "content": [{"type": "text", "text": long_text}]},
+        ]
+        out = run._format_trajectory_for_critic("my answer")
+        # The reasoning block should be truncated at 1500, not 400
+        reasoning_section = [s for s in out.split("---") if "AGENT REASONING" in s]
+        assert reasoning_section, "No AGENT REASONING section found"
+        assert "x" * 1500 in reasoning_section[0]
+        assert "x" * 1501 not in reasoning_section[0]
+
+    def test_format_trajectory_tool_result_limit_is_2500(self):
+        """TOOL RESULT blocks use [:2500], not [:600]."""
+        run = self._make_run()
+        long_result = "y" * 3000
+        run.messages = [
+            {"role": "user",
+             "content": [
+                 {"type": "tool_result",
+                  "tool_use_id": "tu_1",
+                  "content": long_result}
+             ]},
+        ]
+        out = run._format_trajectory_for_critic("my answer")
+        tool_section = [s for s in out.split("---") if "TOOL RESULT" in s]
+        assert tool_section, "No TOOL RESULT section found"
+        assert "y" * 2500 in tool_section[0]
+        assert "y" * 2501 not in tool_section[0]
+
+
+class TestLoadCriticSkill:
+    """CA-3: _load_critic_skill() reads host-side SKILLS/critic-guidance/SKILL.md."""
+
+    def test_load_critic_skill_returns_body_without_frontmatter(self):
+        from harness.config import RunConfig
+        run = AgentRun.__new__(AgentRun)
+        run.config = RunConfig()
+        body = run._load_critic_skill()
+        # Should not contain YAML frontmatter markers
+        assert "---" not in body.split("\n")[0]
+        # Should contain something from the skill body
+        assert len(body.strip()) > 0
+
+    def test_load_critic_skill_graceful_when_missing(self, tmp_path, monkeypatch):
+        """Missing SKILL.md returns empty string, no exception."""
+        from harness.config import RunConfig
+        import harness.agent as agent_mod
+        from pathlib import Path
+        # Point SKILLS dir to a temp directory with no critic-guidance
+        monkeypatch.setattr(agent_mod, "__file__",
+                            str(tmp_path / "harness" / "agent.py"))
+        run = AgentRun.__new__(AgentRun)
+        run.config = RunConfig()
+        result = run._load_critic_skill()
+        assert result == ""
+
+    def test_load_critic_skill_content_appended_to_system_prompt(self):
+        """CA-3: _load_critic_skill() return value is concatenated onto CRITIC_SYSTEM_PROMPT
+        inside _run_critic() — verified by checking that full_system contains both."""
+        from harness.config import RunConfig
+        from harness.llm import LLMResponse, LLMUsage
+        from unittest.mock import MagicMock
+
+        captured = {}
+
+        def fake_chat(*, model, system, messages, tools, max_tokens):
+            captured["system"] = system
+            return LLMResponse(
+                stop_reason="end_turn",
+                text="no concerns",
+                tool_calls=[],
+                usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+                raw_content=[],
+            )
+
+        critic_client = MagicMock()
+        critic_client.chat.side_effect = fake_chat
+
+        run = AgentRun.__new__(AgentRun)
+        run.messages = []
+        run.config = RunConfig(critic_model="claude-haiku-4-5-20251001")
+        run.cost_tracker = MagicMock()
+        run.input_tokens = 0
+        run.output_tokens = 0
+        run.cache_read_tokens = 0
+        run.logger = MagicMock()
+        run.critic_client = critic_client
+
+        run._run_critic("FINAL ANSWER: test")
+
+        # The system prompt passed to the critic must contain the CRITIC_SYSTEM_PROMPT
+        # AND the critic guidance skill body
+        assert "CITATION GATE" in captured["system"]
+        skill_body = run._load_critic_skill()
+        if skill_body:
+            assert skill_body.strip()[:50] in captured["system"]

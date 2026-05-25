@@ -122,6 +122,11 @@ You are a scientific reasoning auditor reviewing an AI agent's solution to a
 computational biology problem. Your job is to identify assumptions the agent
 made that were NOT empirically verified during the analysis.
 
+CITATION GATE — Before raising any concern, locate the exact agent step where
+the claim was made. You MUST quote it as: 'Step N says: ...<verbatim>...'
+If you cannot find the quote in the trajectory above, do not raise the concern.
+Absence of a citation means the claim is your inference, not the agent's — omit it.
+
 For each unverified assumption:
 1. State the assumption clearly
 2. Explain what the agent would need to do to verify it
@@ -137,7 +142,7 @@ final answer if it turned out to be wrong.
 
 For any HIGH-risk flag, list 1–2 alternative answers consistent with the
 trajectory's evidence. Cite the specific trajectory step that supports each
-alternative. Do not invent claims the agent did not make.
+alternative.
 
 Distinguish two outcomes — (A) Agent answer appears wrong on the evidence
 (list alternatives); (B) Agent answer may be correct but unverified (state
@@ -154,6 +159,10 @@ STEP_LIMIT_PROMPT = (
 CRITIC_FOLLOWUP_PROMPT = """\
 You previously audited this agent's reasoning. The agent has now responded.
 Review the new tool calls and reasoning since your last critique.
+
+CITATION GATE — For any NEW concern raised in this review, you must quote the
+specific step from the agent's most recent response: 'Step N says: ...'
+Do not introduce concerns about earlier steps unless you now have a verbatim quote.
 
 For each HIGH-risk assumption you flagged: (a) did the agent empirically test
 it via a tool call? Mark each as one of:
@@ -559,20 +568,37 @@ class AgentRun:
 
         return self._result("error", start)  # unreachable
 
+    def _load_critic_skill(self) -> str:
+        """Load SKILLS/critic-guidance/SKILL.md, strip YAML frontmatter, return body.
+
+        Returns empty string if the file is missing (graceful degradation).
+        The skill is host-side only — NOT baked into the Docker image.
+        """
+        skill_path = Path(__file__).parent.parent / "SKILLS" / "critic-guidance" / "SKILL.md"
+        try:
+            text = skill_path.read_text()
+        except FileNotFoundError:
+            return ""
+        # Strip YAML frontmatter (--- ... ---)
+        import re as _re
+        body = _re.sub(r"^---\n.*?\n---\n?", "", text, flags=_re.DOTALL)
+        return "\n\n" + body.strip()
+
     def _run_critic(self, final_answer: str, system_prompt: str = CRITIC_SYSTEM_PROMPT) -> str:
         """Call the critic model on the current trajectory. Returns critique text, or '' on error."""
         trajectory_text = self._format_trajectory_for_critic(final_answer)
         critic_model = self.config.critic_model or self.config.model
+        full_system = system_prompt + self._load_critic_skill()
         try:
             response = self.critic_client.chat(
                 model=critic_model,
-                system=system_prompt,
+                system=full_system,
                 messages=[{
                     "role": "user",
                     "content": f"Please audit the following agent trajectory:\n\n{trajectory_text}",
                 }],
                 tools=[],
-                max_tokens=1024,
+                max_tokens=2048,
             )
             # Attribute critic token usage to this run's totals
             self.cost_tracker.add(
@@ -612,7 +638,7 @@ class AgentRun:
                             result = " ".join(
                                 b.get("text", "") for b in result if isinstance(b, dict)
                             )
-                        sections.append(f"TOOL RESULT:\n{str(result)[:600]}")
+                        sections.append(f"TOOL RESULT:\n{str(result)[:2500]}")
 
             elif role == "assistant":
                 for block in content:
@@ -622,7 +648,7 @@ class AgentRun:
                     if btype == "text":
                         text = block.get("text", "").strip()
                         if text:
-                            sections.append(f"AGENT REASONING:\n{text[:400]}")
+                            sections.append(f"AGENT REASONING:\n{text[:1500]}")
                     elif btype == "tool_use":
                         cmd = block.get("input", {}).get("command", "")
                         cmd_lines = cmd.splitlines()
