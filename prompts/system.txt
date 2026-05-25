@@ -204,6 +204,15 @@ Bio method recipes are in /workspace/skills/. The available recipes are listed i
 the environment context at the start of this run. Use `cat /workspace/skills/<name>.md`
 to read a recipe before implementing the corresponding analysis.
 
+For reference genome retrieval, use the background-download pattern in
+`/workspace/skills/genome-retrieval.md` (preferred: EBI/Gencode URL). For targeted
+sequence extraction of ≤50 intervals without downloading a full genome, see
+`/workspace/skills/ucsc-sequence-fetch.md`.
+
+For BLAST sequence searches, use the `blast_search` tool — do not call blastn/blastp
+directly in bash (not in PATH). See `/workspace/skills/blast-search.md` for recipes
+and empty-results troubleshooting.
+
 Install additional tools if needed:
 ```bash
 pip install <package>

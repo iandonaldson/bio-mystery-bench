@@ -68,6 +68,9 @@ WORKDIR /workspace
 # rebuild command.
 COPY SKILLS/deg-functional-enrichment/SKILL.md /workspace/skills/deg-functional-enrichment.md
 COPY SKILLS/chipseq-tf-identification/SKILL.md /workspace/skills/chipseq-tf-identification.md
+COPY SKILLS/genome-retrieval/SKILL.md /workspace/skills/genome-retrieval.md
+COPY SKILLS/ucsc-sequence-fetch/SKILL.md /workspace/skills/ucsc-sequence-fetch.md
+COPY SKILLS/blast-search/SKILL.md /workspace/skills/blast-search.md
 
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
