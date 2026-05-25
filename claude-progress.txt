@@ -1,13 +1,11 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-22 — Post-remediation Qwen3 rerun complete (RERUN-5). Fixed latent Docker build
-context bug (`ensure_docker_image()` now passes repo root as context, README updated).
-Ran 5-problem preview with two-round critic + all post-mortem fixes. Results recorded
-below: pass@1 20% (was 0%), pass@5 80% (was 60%). Both primary pass criteria met.
-hb002 regressed (0/5, was 1/5) — new failure modes: resource_abort citing missing
-HMMER/barrnap + hallucinated wrong-species answers. hb022 and hb053 now have pass@5
-for the first time.
+2026-05-25 — Post-RERUN-5 investigation. Confirmed `/workspace/skills/` was empty in
+all RERUN-5 containers (cached image predated GM-5; build-context bug would also have
+blocked any forced rebuild). Trajectory analysis and remediation effectiveness CSV
+produced (documents/code_walkthroughs/10.* and 11.*). Three new feature slices planned
+(SI/SK/SL) and added to features.md. Next agent session should implement SI first.
 
 Earlier: Agent A close-session added GM section to features.md, L-22/L-23 to learnings,
 walkthrough #9. Agent B close-session migrated SKILLs to directory format. Qwen3 post-
@@ -80,7 +78,10 @@ Pass criteria vs targets:
 - cost delta < $2: ✅ −$3.64 (cheaper!)
 
 ## Active feature slice
-None — Qwen3 post-mortem remediations (CR2, BE, FA, CP, GM) all merged 2026-05-22.
+SI (Stale Docker Image Detection) — first of three RERUN-5 infrastructure remediations.
+Must cut branch from main *after* close-agent-a PR (build-context fix d9c0571) is merged.
+See `documents/features.md` §"RERUN-5 Infrastructure & Prompt Remediations" for full
+sub-slice breakdown (SI-1 to SI-4).
 
 ## Documentation
 - documents/code_walkthroughs/code_flow.md — end-to-end harness walkthrough (single Anthropic provider)
@@ -157,6 +158,9 @@ None — Qwen3 post-mortem remediations (CR2, BE, FA, CP, GM) all merged 2026-05
   wrote walkthrough #9 (this session)
 
 ## Pending slices
+- SI: Stale Docker Image Detection (SI-1 to SI-4) — hash-gated rebuild in `ensure_docker_image()`
+- SK: Auto-inject Skills Directory into Environment Context (SK-1 to SK-3) — push `ls /workspace/skills/` into initial user message
+- SL: Step-limit Answer Extraction (SL-1 to SL-4) — inject STEP_LIMIT_PROMPT when max_steps hit during tool_use
 - Curated bioinformatics tools (structured wrappers for DESeq2, STAR, featureCounts)
 
 ## Blockers / open questions for human
@@ -177,28 +181,29 @@ None — Qwen3 post-mortem remediations (CR2, BE, FA, CP, GM) all merged 2026-05
 - CR2 and FA test classes added by sibling agents
 
 ## Next steps (in priority order)
-1. ✅ Docker build context fix — `ensure_docker_image()` now passes repo root + `-f docker/Dockerfile`;
-   README quick-start updated. Committed on close-agent-a branch (PR pending).
-2. README update — `--max-critic-rounds` and `after_critic_response` injection point are still
-   missing from the CLI options table in `README.md`. A small follow-up PR should add those flags.
-3. ✅ Benchmark rerun (RERUN-5) — complete. Results in claude-progress.txt §Comparative Results
-   (RERUN-5). pass@1=20%, pass@5=80%. Both primary targets met.
-4. hb002 regression post-mortem — hb002 went from pass@5=✅ (baseline) to 0/5 (new run).
-   New failure patterns: (a) attempt 2 resource_abort claiming BLAST/HMMER/barrnap unavailable
-   even with BE fix active — agent bypassed blast_search and tried direct bash BLAST; (b)
-   attempts 1,3,4,5 hallucinated completely wrong species (B.cereus, V.cholerae, L.casei, E.coli).
-   The BE fix helps when blast_search is called; it does not prevent the agent from bypassing
-   the tool entirely. Next action: review hb002 trajectories to confirm bypass pattern, then
-   consider strengthening the system prompt to require blast_search over raw bash BLAST calls.
-5. CI guard against missing initialisers — add a test or AST-based linter rule that diffs the
-   set of `self.X` references inside `AgentRun._loop` against the set of `self.X = ...`
-   assignments in `AgentRun.__init__`. The motivating incident is captured in L-21 — FA's
-   `_final_answer_reprompted` reference shipped without an initialiser, breaking 4 tests on
-   `main` until PR #59 folded in the one-line fix. A unit test along the lines of
-   `test_agent_run_init_covers_all_loop_self_attrs` would catch the next instance at PR time.
-5. Curated bioinformatics tool wrappers (still pending; not started). Structured wrappers
-   for DESeq2, STAR, featureCounts to reduce stdout volume. Decompose per tool, one sub-slice
-   each — see L-05 (elephant carpaccio rule).
+1. Merge close-agent-a PR — includes build-context fix (d9c0571) and RERUN-5 trajectory
+   analysis docs (10.* and 11.*). All SI/SK/SL branches must be cut from main after merge.
+2. SI: Stale Docker Image Detection — hash-gated rebuild so cached images are automatically
+   invalidated when Dockerfile or SKILLS content changes. New file `tests/test_ensure_docker.py`.
+   ~7 new tests. See features.md §SI for sub-slice breakdown.
+3. SK: Auto-inject Skills Directory — `_get_environment_context()` runs `ls /workspace/skills/`
+   and appends the listing to the initial user message. Ensures agents see available skill
+   files from step 1 without relying on them following the system prompt instruction.
+   ~3 new tests. See features.md §SK.
+4. SL: Step-limit Answer Extraction — injects `STEP_LIMIT_PROMPT` when `max_steps` is hit
+   during a `tool_use` turn, triggering one final API call so the FA + success path can fire.
+   Closes the FA structural gap (abort tool and step-limit-during-tool_use bypass).
+   ~2 new tests. See features.md §SL.
+5. README update — `--max-critic-rounds` and `after_critic_response` injection point are still
+   missing from the CLI options table in `README.md`. Small follow-up after SI/SK/SL.
+6. CI guard against missing initialisers — `test_agent_run_init_covers_all_loop_self_attrs`
+   AST-based test to prevent recurrence of the L-21 / FA initialiser incident. SL-2 adds
+   `_step_limit_prompted` which makes this guard more valuable. See progress item #5 (old).
+7. hb002 regression — agent bypasses `blast_search` and calls `blastn` directly via bash,
+   getting "command not found" and concluding BLAST is absent even with BE fix active. Consider
+   a system prompt rule explicitly requiring `blast_search` over raw bash BLAST invocations.
+8. Curated bioinformatics tool wrappers (still pending; not started). Structured wrappers
+   for DESeq2, STAR, featureCounts. Decompose per tool — see L-05 (elephant carpaccio rule).
 
 ## Notes for next agent session
 - Provider flags: --provider anthropic|openai|ollama|groq, --api-base-url, --api-key, --judge-model

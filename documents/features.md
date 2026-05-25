@@ -608,3 +608,65 @@ passes `dockerfile_dir` (= `docker/`) to `docker build`; `README.md` quick-start
 the same old context. Both need a one-line update to `-f docker/Dockerfile .` from repo root.
 The currently cached `bio-mystery-bench:latest` image keeps live runs working until the next
 cache-clear — see `claude-progress.txt` Next steps.
+
+---
+
+## RERUN-5 Infrastructure & Prompt Remediations (2026-05-25)
+
+Post-mortem of RERUN-5 confirmed that `/workspace/skills/` was empty in every container
+because (a) `ensure_docker_image()` used a name-only existence check and hit a cached image
+predating GM-5, (b) the build-context bug would have blocked any forced rebuild anyway
+(fixed separately in `d9c0571`), and (c) even with correct files present, no agent ever ran
+`ls /workspace/skills/` — zero trajectory matches across all 25 attempts.
+
+Three remediations with tests. All branches must be cut from `main` *after* the
+`close-agent-a` PR (build-context fix) is merged.
+
+### ⬜ SI: Stale Docker Image Detection (SI-1 to SI-4)
+
+Adds a Dockerfile + SKILLS content hash to the built image label. On startup, if the
+stored label differs from the current hash, a yellow warning is printed and the image is
+rebuilt automatically. Eliminates silent use of stale cached images.
+
+| ID | Scope | Test |
+|----|-------|------|
+| SI-1 | Add `_compute_build_hash(dockerfile_dir: Path) -> str` in `scripts/run_eval.py`. SHA-256 of: `Dockerfile` content + all files under `docker/` + all files under `SKILLS/` (sorted paths). Returns first 16 hex chars. | `test_compute_build_hash_changes_on_dockerfile_change`, `test_compute_build_hash_changes_on_skill_file_change` |
+| SI-2 | Modify `ensure_docker_image()` — when image exists, read back label via `docker image inspect --format '{{index .Config.Labels "build_hash"}}'`. If absent or mismatched, log yellow warning and rebuild. | `test_ensure_docker_rebuilds_on_hash_mismatch`, `test_ensure_docker_skips_rebuild_on_hash_match` |
+| SI-3 | Pass `--label build_hash=<hash>` to the `docker build` subprocess call so the hash is stamped into the new image. | `test_ensure_docker_passes_label_on_build` (assert label arg in mock `subprocess.run` call) |
+| SI-4 | Add `--rebuild` CLI flag to `run_eval.py` (argparse), passed as `force_rebuild: bool` to `ensure_docker_image()`. When `True`, skip hash check and always rebuild. | `test_force_rebuild_bypasses_hash_check` |
+
+**Files:** `scripts/run_eval.py`, `tests/test_ensure_docker.py` (new)
+
+### ⬜ SK: Auto-inject Skills Directory into Environment Context (SK-1 to SK-3)
+
+Instead of relying on agents to remember to run `ls /workspace/skills/`, the harness now
+runs it automatically in `_get_environment_context()` and appends the listing to the initial
+user message. Agents see available recipes from step 1 without any behaviour change required.
+
+| ID | Scope | Test |
+|----|-------|------|
+| SK-1 | In `harness/agent.py:_get_environment_context()`, add `container.exec_command("ls /workspace/skills/ 2>/dev/null \|\| true")`. Append `"\n\n## Available bio method recipes\n{listing}"` to the returned context string. If listing is empty, emit `"(none — /workspace/skills/ is empty)"`. | `test_environment_context_includes_skills_listing` (mock container returns two filenames — assert both appear), `test_environment_context_handles_empty_skills_dir` |
+| SK-2 | Update `prompts/system.txt` lines 198–200 — replace *"Run `ls /workspace/skills/` to see what's available"* with *"The available recipes are listed in the environment context at the start of this run."* | `test_system_prompt_does_not_tell_agent_to_ls_skills` (assert old instruction string absent) |
+| SK-3 | Extend `scripts/smoke_test_container.py` — after the two existing `test -f /workspace/skills/<name>.md` assertions, add a check that `ls /workspace/skills/` returns exactly two lines. Provides a clear "files missing" failure if the image is stale. | Smoke test (manual run, not unit test) |
+
+**Files:** `harness/agent.py`, `prompts/system.txt`, `scripts/smoke_test_container.py`,
+`tests/test_agent_helpers.py`
+
+### ⬜ SL: Step-limit Answer Extraction (SL-1 to SL-4)
+
+`FA` (FINAL ANSWER marker enforcement) only fires on `end_turn` events. Runs that
+terminate via the `abort` tool or hit `max_steps` while in a `tool_use` turn bypass it
+entirely. Confirmed in RERUN-5: recq_a1 ended mid-tool-use (step limit during `pip install`),
+recq_a3/a4 aborted before any `end_turn`. Fix: when `max_steps` is reached on a `tool_use`
+turn, inject one forced-answer prompt and make a single extra API call so the existing FA +
+success path can fire normally.
+
+| ID | Scope | Test |
+|----|-------|------|
+| SL-1 | Add `STEP_LIMIT_PROMPT` constant in `harness/agent.py` (alongside `CRITIC_FOLLOWUP_PROMPT`): *"You have reached the step limit. You MUST state your best answer immediately. Do not call any more tools. Respond with only: FINAL ANSWER: \<your answer\>"* | `test_step_limit_prompt_exists_and_mentions_final_answer` |
+| SL-2 | Add `self._step_limit_prompted: bool = False` to `AgentRun.__init__` (alongside other bool flags). | Covered by CI-guard test `test_agent_run_init_covers_all_loop_self_attrs` (Next Steps #5) |
+| SL-3 | In `_loop()`, change the max_steps exit (lines 262–263): if `response.stop_reason == "tool_use"` and `not self._step_limit_prompted`, set flag, append `STEP_LIMIT_PROMPT` as a user message, make one extra `client.chat()` call with `max_tokens=512`, then `continue`. Guard prevents re-entry; on any subsequent iteration, fall through to `_result("max_steps", start)`. | `test_step_limit_during_tool_use_triggers_final_answer_prompt` (mock: `tool_use` × N then `end_turn` with FINAL ANSWER → non-empty `final_message`); `test_step_limit_guard_prevents_double_prompt` (mock: `tool_use` again on N+1 → `_result("max_steps", ...)` called, no second injection) |
+| SL-4 | Add learning L-24 to `.claude/skills/code-learnings/SKILL.md`: FA structural gap — `abort` tool and step-limit-during-`tool_use` bypass `end_turn` FA check; SL remediation closes this by injecting `STEP_LIMIT_PROMPT` when `stop_reason == "tool_use"` at `max_steps`. | Source inspection |
+
+**Files:** `harness/agent.py`, `.claude/skills/code-learnings/SKILL.md`,
+`tests/test_agent_helpers.py`
