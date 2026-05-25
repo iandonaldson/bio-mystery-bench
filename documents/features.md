@@ -670,3 +670,41 @@ success path can fire normally.
 
 **Files:** `harness/agent.py`, `.claude/skills/code-learnings/SKILL.md`,
 `tests/test_agent_helpers.py`
+
+---
+
+## Time/Step Messaging & Genome Download Skills (2026-05-25)
+
+Post-mortem of RERUN-5 recq trajectories confirmed two further failure patterns:
+(1) agents cite "time constraints" and "run timeout" as reasons to abort or change
+strategy, even though there is no wall-clock time limit — only a step limit; and
+(2) genome downloads failed in 3 of 5 recq attempts because agents used slower mirrors
+(UCSC/NCBI) or ran blocking `wget` that hit the per-command timeout. The one success
+(recq_a2) used the EBI/Gencode URL with `-c` resume flag and completed in ~585 s, just
+under the 600 s timeout. Background-download pattern and per-chromosome fallback would
+make this robust across all network conditions.
+
+Implement after SI/SK/SL are merged.
+
+### ⬜ TM: Fix Time/Step Messaging (TM-1 to TM-3)
+
+| ID | Scope | Test |
+|----|-------|------|
+| TM-1 | Remove "run timeout" abort criterion from `prompts/system.txt` (line ~72). Replace with: *"There is **no wall-clock time limit** on this run. A download or computation that takes 10+ minutes counts as a single step. The only hard constraint is the step count in the progress footer."* Also add at top of §"Step and context budget": *"Note: time is not a constraint. One step = one tool call, regardless of how long it takes."* | `test_system_prompt_does_not_mention_run_timeout` — assert `"run timeout"` absent |
+| TM-2 | Extend `_get_environment_context()` in `harness/agent.py` to append: `"Step budget: {max_steps} steps total (1 tool call = 1 step, regardless of wall time)\nPer-command timeout: {step_timeout_seconds}s (downloads may use this fully — it is fine)"` | `test_environment_context_includes_step_budget` — mock AgentRun with `max_steps=25, step_timeout_seconds=600`; assert both values appear |
+| TM-3 | Soften ≥75% step-budget WARNING in `prompts/system.txt`. Replace *"You have enough evidence. Begin drafting your final answer. Do not start new lines of investigation — consolidate what you already know."* with *"You are approaching the step limit. If a download or multi-step computation is already underway and likely to complete within the remaining steps, continue it. Otherwise, consolidate what you already know and begin drafting your final answer. Do not start entirely new lines of investigation."* | `test_system_prompt_warning_threshold_mentions_in_progress_work` — assert `"already underway"` present |
+
+**Files:** `prompts/system.txt`, `harness/agent.py`, `tests/test_agent_helpers.py`
+
+### ⬜ GD: Genome Download Skills (GD-1 to GD-4)
+
+| ID | Scope | Test |
+|----|-------|------|
+| GD-1 | Create `SKILLS/genome-retrieval/SKILL.md`. Two recipes: (A) background-download pattern using EBI/Gencode URL with `nohup wget -c ... &` + PID file + `ls -lh` polling calls (avoids per-command timeout for >10 min downloads); (B) per-chromosome download via UCSC for peaks spanning ≤5 chromosomes. Fallback URL order: EBI Gencode → Ensembl FTP → NCBI RefSeq (NCBI analysis set is ~3× larger; last resort). | `test_skill_file_genome_retrieval_has_frontmatter_and_two_recipes` — parse YAML frontmatter, assert `name`/`description`, assert Recipe A and Recipe B headings present |
+| GD-2 | Create `SKILLS/ucsc-sequence-fetch/SKILL.md`. Recipe for UCSC REST API (`api.genome.ucsc.edu/getData/sequence`) targeted interval fetching — best for ≤50 intervals. Includes guidance: "For >50 intervals use genome-retrieval skill instead. UCSC API throttles ~1 req/s." | `test_skill_file_ucsc_fetch_has_frontmatter_and_api_recipe` — assert `api.genome.ucsc.edu` and `fetch_sequence` present |
+| GD-3 | Add two COPY directives to `docker/Dockerfile`: `COPY SKILLS/genome-retrieval/SKILL.md /workspace/skills/genome-retrieval.md` and `COPY SKILLS/ucsc-sequence-fetch/SKILL.md /workspace/skills/ucsc-sequence-fetch.md`. Extend `scripts/smoke_test_container.py` skill-file assertions from 2 to 4. Update SK-3 exact-count check from 2 lines to 4 lines. | Smoke test (manual). Unit tests from GD-1/GD-2 also verify file existence and well-formedness. |
+| GD-4 | Append to `prompts/system.txt` §"Environment details": *"For reference genome retrieval, use the background-download pattern in `/workspace/skills/genome-retrieval.md` (preferred: EBI/Gencode URL). For targeted sequence extraction of ≤50 intervals without downloading a full genome, see `/workspace/skills/ucsc-sequence-fetch.md`."* | `test_system_prompt_mentions_genome_retrieval_skill` — assert `"genome-retrieval"` present |
+
+**Files:** `SKILLS/genome-retrieval/SKILL.md` (new), `SKILLS/ucsc-sequence-fetch/SKILL.md`
+(new), `docker/Dockerfile`, `scripts/smoke_test_container.py`, `prompts/system.txt`,
+`tests/test_agent_helpers.py`
