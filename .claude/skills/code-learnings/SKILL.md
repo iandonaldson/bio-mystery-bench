@@ -616,3 +616,35 @@ they will all pick that same point. Brief authors can pre-empt this by assigning
 explicit insertion anchors per agent ("Agent A: after `TestBlastToolDefinition`,
 Agent C: before `TestExtractText`"), but in the absence of such guidance, expect
 the conflict and resolve it by stacking.
+
+---
+
+## L-24: FA structural gap — `abort` tool and step-limit-during-`tool_use` bypass the `end_turn` FA check
+
+**Lesson (2026-05-25 — SL slice):** The FINAL ANSWER marker enforcement (FA-2) only fires on
+`end_turn` responses. Two paths completely bypass it:
+
+1. **`abort` tool** — when the agent calls `abort`, `_handle_abort()` returns immediately with
+   `status="resource_abort"` and no FA check is applied. This is intentional — abort runs don't
+   produce a final answer.
+
+2. **Step-limit during `tool_use`** — when `max_steps` is reached at the top of the while loop,
+   the run terminates with `status="max_steps"` before the agent produces an `end_turn` response.
+   Confirmed in RERUN-5: `recq_a1` ended mid-tool-use (step limit hit during `pip install`),
+   leaving no extractable final answer.
+
+**SL remediation (PR for SL slice):** When `self.steps >= self.config.max_steps` AND
+`response.stop_reason == "tool_use"` AND `not self._step_limit_prompted`:
+1. Set `self._step_limit_prompted = True`.
+2. Append `STEP_LIMIT_PROMPT` as a user message after the tool results.
+3. Make one extra `client.chat()` call with `max_tokens=512`.
+4. If the extra call returns `end_turn` → apply a one-shot FA check and return `status="success"`.
+5. If the extra call returns `tool_use` again → return `_result("max_steps", start)` (guard fires).
+
+**Key design choice:** The extra call is handled inline inside the `tool_use` branch, not via
+`continue` + the top-of-loop step check. This avoids the "steps > max_steps at top of loop"
+problem that would fire immediately before the next API call.
+
+**Rule:** Any new `end_turn` path added to `_loop()` must explicitly check `_has_final_answer_marker()`
+or document why it is exempt (e.g. `abort` is exempt by design). Similarly, any new early-exit
+path that bypasses `end_turn` must be audited for whether FA enforcement is needed there.

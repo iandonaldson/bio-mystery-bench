@@ -1369,3 +1369,139 @@ class TestSystemPromptSkillsDiscovery:
         assert "Run `ls /workspace/skills/`" not in prompt
         # The new instruction should mention environment context
         assert "environment context" in prompt
+
+
+# ---------------------------------------------------------------------------
+# SL: Step-limit Answer Extraction (SL-1 to SL-3)
+# ---------------------------------------------------------------------------
+
+from harness.agent import STEP_LIMIT_PROMPT
+
+
+class TestStepLimitPrompt:
+    def test_step_limit_prompt_exists_and_mentions_final_answer(self):
+        """SL-1: STEP_LIMIT_PROMPT constant exists and instructs FINAL ANSWER."""
+        assert "FINAL ANSWER" in STEP_LIMIT_PROMPT
+        assert "step limit" in STEP_LIMIT_PROMPT.lower()
+
+    def test_step_limit_prompted_initialised_false(self):
+        """SL-2: _step_limit_prompted is False in fresh AgentRun."""
+        from harness.config import RunConfig
+        run = AgentRun(
+            client=MagicMock(),
+            container=MagicMock(),
+            problem_question="q",
+            system_prompt="s",
+            config=RunConfig(),
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+        assert run._step_limit_prompted is False
+
+
+def _make_sl_run(responses, max_steps):
+    """Build a minimal AgentRun wired with scripted LLM responses for SL tests."""
+    from harness.llm import LLMResponse, LLMUsage
+    from harness.config import RunConfig
+
+    def _resp(stop_reason, text="", tool_calls=None, raw_content=None):
+        return LLMResponse(
+            stop_reason=stop_reason,
+            text=text,
+            tool_calls=tool_calls or [],
+            usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+            raw_content=raw_content or [],
+        )
+
+    client = MagicMock()
+    client.chat.side_effect = [_resp(**r) for r in responses]
+
+    container = MagicMock()
+    # exec_command: first call = RESOURCE_CHECK_CMD, second = ls skills, rest = bash tools
+    call_counter = {"n": 0}
+
+    def exec_side(command, timeout=300):
+        n = call_counter["n"]
+        call_counter["n"] += 1
+        if n == 0:
+            return ("MEM: 4GB\n", "", 0)   # RESOURCE_CHECK_CMD
+        if n == 1:
+            return ("", "", 0)              # ls /workspace/skills/
+        return ("output", "", 0)            # bash tool calls
+
+    container.exec_command.side_effect = exec_side
+
+    config = RunConfig(
+        max_steps=max_steps,
+        step_timeout_seconds=10,
+        run_timeout_seconds=120,
+    )
+
+    run = AgentRun(
+        client=client,
+        container=container,
+        problem_question="test q",
+        system_prompt="sys",
+        config=config,
+        logger=MagicMock(),
+        cost_tracker=MagicMock(),
+    )
+    return run, client
+
+
+def _bash_tool_use_response(tool_id):
+    """Return kwargs for a scripted tool_use response that calls bash."""
+    tc = MagicMock()
+    tc.name = "bash"
+    tc.id = tool_id
+    tc.input = {"command": "echo hi"}
+    return {
+        "stop_reason": "tool_use",
+        "text": "",
+        "tool_calls": [tc],
+        "raw_content": [{"type": "tool_use", "id": tool_id, "name": "bash",
+                          "input": {"command": "echo hi"}}],
+    }
+
+
+class TestStepLimitExtraction:
+    def test_step_limit_during_tool_use_triggers_final_answer_prompt(self):
+        """SL-3a: tool_use × max_steps → STEP_LIMIT_PROMPT injected → extra end_turn call
+        → status='success' with non-empty final_message."""
+        max_steps = 2
+        responses = [
+            _bash_tool_use_response("tu_1"),   # step 1
+            _bash_tool_use_response("tu_2"),   # step 2 — hits max_steps
+            # Extra call after STEP_LIMIT_PROMPT
+            {"stop_reason": "end_turn",
+             "text": "FINAL ANSWER: Bacillus cereus",
+             "tool_calls": [],
+             "raw_content": [{"type": "text", "text": "FINAL ANSWER: Bacillus cereus"}]},
+        ]
+        run, client = _make_sl_run(responses, max_steps=max_steps)
+        result = run.run()
+
+        assert result.status == "success"
+        assert result.final_message != ""
+        assert "Bacillus cereus" in result.final_message
+        # Verify the extra call was made (3 total: 2 tool_use + 1 step_limit)
+        assert client.chat.call_count == 3
+
+    def test_step_limit_guard_prevents_double_prompt(self):
+        """SL-3b: if extra step-limit call also returns tool_use, guard fires and
+        returns max_steps — no second STEP_LIMIT_PROMPT injection."""
+        max_steps = 2
+        responses = [
+            _bash_tool_use_response("tu_1"),   # step 1
+            _bash_tool_use_response("tu_2"),   # step 2 — hits max_steps
+            # Extra call after STEP_LIMIT_PROMPT: STILL tool_use
+            _bash_tool_use_response("tu_3"),
+        ]
+        run, client = _make_sl_run(responses, max_steps=max_steps)
+        result = run.run()
+
+        assert result.status == "max_steps"
+        # Only 3 client.chat calls — not 4 (no second injection)
+        assert client.chat.call_count == 3
+        # _step_limit_prompted is True — guard fired
+        assert run._step_limit_prompted is True
