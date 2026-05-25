@@ -293,6 +293,7 @@ python scripts/run_eval.py [OPTIONS]
   --max-steps      INT                 Agent steps per attempt (default: 100)
   --results-dir    DIR                 Output directory (default: results/)
   --no-build                           Skip Docker image check
+  --rebuild                            Force Docker image rebuild even if hash matches
   --critic-injection-points  POINT     Inject critic at this point (repeatable).
                                        Only "after_final_answer" is currently supported.
   --critic-model   MODEL               Model for the critic (default: same as agent model).
@@ -520,3 +521,4 @@ To replicate Anthropic's published numbers you need the full 99-problem dataset 
 - [Code walkthrough: second critic exchange + FINAL ANSWER marker enforcement (CR2 + FA)](documents/code_walkthroughs/7.Agent_C_walkthrough.md)
 - [Code walkthrough: empty BLAST disambiguation + critic prompt alternatives (BE + CP)](documents/code_walkthroughs/8.Agent_B_walkthrough.md)
 - [Code walkthrough: general method advice + in-container reference SKILLs (GM)](documents/code_walkthroughs/9.Agent_A_walkthrough.md)
+- [Code walkthrough: RERUN-5 harness remediations (SI/SK/SL/TM/GD/CA)](documents/code_walkthroughs/12.rerun5_remediations.md)
