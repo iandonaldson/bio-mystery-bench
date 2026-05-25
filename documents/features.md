@@ -622,7 +622,7 @@ predating GM-5, (b) the build-context bug would have blocked any forced rebuild 
 Three remediations with tests. All branches must be cut from `main` *after* the
 `close-agent-a` PR (build-context fix) is merged.
 
-### ⬜ SI: Stale Docker Image Detection (SI-1 to SI-4)
+### ✅ SI: Stale Docker Image Detection (SI-1 to SI-4)
 
 Adds a Dockerfile + SKILLS content hash to the built image label. On startup, if the
 stored label differs from the current hash, a yellow warning is printed and the image is
@@ -637,7 +637,7 @@ rebuilt automatically. Eliminates silent use of stale cached images.
 
 **Files:** `scripts/run_eval.py`, `tests/test_ensure_docker.py` (new)
 
-### ⬜ SK: Auto-inject Skills Directory into Environment Context (SK-1 to SK-3)
+### ✅ SK: Auto-inject Skills Directory into Environment Context (SK-1 to SK-3)
 
 Instead of relying on agents to remember to run `ls /workspace/skills/`, the harness now
 runs it automatically in `_get_environment_context()` and appends the listing to the initial
@@ -652,7 +652,7 @@ user message. Agents see available recipes from step 1 without any behaviour cha
 **Files:** `harness/agent.py`, `prompts/system.txt`, `scripts/smoke_test_container.py`,
 `tests/test_agent_helpers.py`
 
-### ⬜ SL: Step-limit Answer Extraction (SL-1 to SL-4)
+### ✅ SL: Step-limit Answer Extraction (SL-1 to SL-4)
 
 `FA` (FINAL ANSWER marker enforcement) only fires on `end_turn` events. Runs that
 terminate via the `abort` tool or hit `max_steps` while in a `tool_use` turn bypass it
@@ -686,7 +686,7 @@ make this robust across all network conditions.
 
 Implement after SI/SK/SL are merged.
 
-### ⬜ TM: Fix Time/Step Messaging (TM-1 to TM-3)
+### ✅ TM: Fix Time/Step Messaging (TM-1 to TM-3)
 
 | ID | Scope | Test |
 |----|-------|------|
@@ -696,7 +696,7 @@ Implement after SI/SK/SL are merged.
 
 **Files:** `prompts/system.txt`, `harness/agent.py`, `tests/test_agent_helpers.py`
 
-### ⬜ GD: Genome Download Skills (GD-1 to GD-4)
+### ✅ GD: Genome Download Skills (GD-1 to GD-5)
 
 | ID | Scope | Test |
 |----|-------|------|
@@ -725,7 +725,7 @@ claims" line is buried and provides no enforcement mechanism.
 Implement after SI/SK/SL/TM/GD are merged (touches `harness/agent.py` and `SKILLS/` only —
 no Docker changes — so can be developed in parallel if needed).
 
-### ⬜ CA: Critic Accuracy (CA-1 to CA-5)
+### ✅ CA: Critic Accuracy (CA-1 to CA-5)
 
 | ID | Scope | Test |
 |----|-------|------|
