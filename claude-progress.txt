@@ -161,6 +161,8 @@ sub-slice breakdown (SI-1 to SI-4).
 - SI: Stale Docker Image Detection (SI-1 to SI-4) — hash-gated rebuild in `ensure_docker_image()`
 - SK: Auto-inject Skills Directory into Environment Context (SK-1 to SK-3) — push `ls /workspace/skills/` into initial user message
 - SL: Step-limit Answer Extraction (SL-1 to SL-4) — inject STEP_LIMIT_PROMPT when max_steps hit during tool_use
+- TM: Fix Time/Step Messaging (TM-1 to TM-3) — remove "run timeout" language; show max_steps in environment context; soften ≥75% WARNING for in-progress work
+- GD: Genome Download Skills (GD-1 to GD-4) — background-download skill (EBI/Gencode URL + PID polling); UCSC REST API skill for ≤50 intervals; bake both into Docker image
 - Curated bioinformatics tools (structured wrappers for DESeq2, STAR, featureCounts)
 
 ## Blockers / open questions for human
@@ -199,7 +201,17 @@ sub-slice breakdown (SI-1 to SI-4).
 6. CI guard against missing initialisers — `test_agent_run_init_covers_all_loop_self_attrs`
    AST-based test to prevent recurrence of the L-21 / FA initialiser incident. SL-2 adds
    `_step_limit_prompted` which makes this guard more valuable. See progress item #5 (old).
-7. hb002 regression — agent bypasses `blast_search` and calls `blastn` directly via bash,
+7. TM: Fix time/step messaging — remove "run timeout" from system prompt; add max_steps and
+   step_timeout_seconds to initial environment context; soften ≥75% step WARNING so agents
+   don't abandon in-progress downloads. Evidence: all 3 failed recq attempts cite "time
+   constraints" verbatim; root cause traced to prompts/system.txt line 72 ("run timeout").
+8. GD: Genome download skills — confirmed EBI/Gencode URL
+   (ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_45/GRCh38.primary_assembly.genome.fa.gz)
+   works in ~585 s (recq_a2). UCSC/NCBI mirrors timed out. Key pattern: launch wget as
+   background process with `nohup wget -c ... & echo $! > wget.pid`, then poll with
+   `ls -lh genome.fa.gz` in separate steps — avoids the 600 s per-command timeout entirely.
+   UCSC REST API (api.genome.ucsc.edu) valid for ≤50 intervals; impractical for 38k peaks.
+9. hb002 regression — agent bypasses `blast_search` and calls `blastn` directly via bash,
    getting "command not found" and concluding BLAST is absent even with BE fix active. Consider
    a system prompt rule explicitly requiring `blast_search` over raw bash BLAST invocations.
 8. Curated bioinformatics tool wrappers (still pending; not started). Structured wrappers
