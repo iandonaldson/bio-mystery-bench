@@ -648,3 +648,44 @@ problem that would fire immediately before the next API call.
 **Rule:** Any new `end_turn` path added to `_loop()` must explicitly check `_has_final_answer_marker()`
 or document why it is exempt (e.g. `abort` is exempt by design). Similarly, any new early-exit
 path that bypasses `end_turn` must be audited for whether FA enforcement is needed there.
+
+---
+
+## L-25: Suffix-injection patterns break tests that assert exact equality on composed strings
+
+**Lesson (2026-05-25 — CA slice):** CA-3 wired `_load_critic_skill()` into `_run_critic()` so
+that the system prompt passed to the critic became `CRITIC_SYSTEM_PROMPT + skill_body` instead of
+`CRITIC_SYSTEM_PROMPT` alone. This immediately broke `TestCriticMultiRound.test_second_critic_uses_followup_prompt`,
+which asserted `captured_system == CRITIC_SYSTEM_PROMPT`. The extra skill body appended after the
+base constant caused the equality to fail — even though the test's intent (confirm the right base
+prompt was used) was satisfied.
+
+**Pattern:** Any time a method changes from returning/passing a *constant* to returning a *constant
++ dynamic suffix*, every test that compares against the constant with `==` will fail, even though
+the semantic intent is unchanged.
+
+**Rule:** When writing tests for methods that produce a string *based on* a known constant,
+prefer `str.startswith(CONSTANT)` or `CONSTANT in result` over `result == CONSTANT`:
+
+```python
+# Fragile — breaks if the implementation appends extra content:
+assert captured_system == CRITIC_SYSTEM_PROMPT
+
+# Robust — survives suffix injection:
+assert captured_system.startswith(CRITIC_SYSTEM_PROMPT)
+```
+
+Apply the same principle to `messages[0]["content"]` assertions when the content might be
+augmented (e.g. environment context prepended, skill listing appended).
+
+**Corollary:** When adding a suffix-injection feature (e.g. `_load_critic_skill()`,
+`_get_environment_context()` appending skill listing), immediately grep for tests that assert
+equality on the string being extended and convert them to `startswith` or `in` checks:
+
+```bash
+grep -n "== CRITIC_SYSTEM_PROMPT\|== CRITIC_FOLLOWUP_PROMPT\|== system_prompt" tests/
+```
+
+**Cross-references:** L-19 (new behavioral constraints on end_turn break existing mock fixtures)
+— both stem from the same root cause: adding code to a path that existing tests assumed was
+simpler than it now is.

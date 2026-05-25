@@ -1,8 +1,11 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-25 — Session implementing SI/SK/SL/TM/GD/CA (PRs #75–#80). All six slices
-complete and merged (pending CA merge). 341/342 tests passing.
+2026-05-25 — Close-session reconciliation pass after SI/SK/SL/TM/GD/CA (PRs #75–#80).
+Updated features.md (fixed 5 drift points in CA/GD/SK sub-slice descriptions and test
+names), added L-25 to code-learnings, wrote walkthrough
+documents/code_walkthroughs/12.rerun5_remediations.md, updated README (--rebuild flag
+and References). Test count unchanged at 341/342.
 
 ## Current status
 All planned RERUN-5 infrastructure remediations and post-mortem improvements are
@@ -81,6 +84,29 @@ CA (Critic Accuracy) — PR #80 open, pending merge.
 
 ## Pending slices
 - Curated bioinformatics tool wrappers (DESeq2, STAR, featureCounts) — not yet started
+
+## Documentation
+Walkthroughs in documents/code_walkthroughs/:
+- code_flow.md — harness end-to-end
+- 2.llm_backend_expansion.md — multi-provider LLM backend
+- 3.Accommodating_OpenAI_models.md — critic agent, prompt engineering, API hardening
+- 7.Agent_C_walkthrough.md — second critic exchange + FINAL ANSWER enforcement (CR2/FA)
+- 8.Agent_B_walkthrough.md — empty BLAST disambiguation + critic prompt alternatives (BE/CP)
+- 9.Agent_A_walkthrough.md — general method advice + in-container reference SKILLs (GM)
+- 12.rerun5_remediations.md — RERUN-5 harness remediations (SI/SK/SL/TM/GD/CA)
+
+## Next steps (in priority order)
+1. Docker image rebuild (after CA merge): `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .`
+   SI hash-gating will detect the stale image automatically on next eval run — this is a reminder
+   to trigger it before RERUN-6.
+2. RERUN-6: run benchmark with Qwen3/Cerebras against all RERUN-5 remediations merged.
+   Expected improvements: hb002 (blast-search SKILL), recq (genome-retrieval + TM), critic hallucinations (CA).
+3. CI guard: AST-based test that asserts every `self.X` read in `AgentRun._loop` has a matching
+   `self.X = …` initialiser in `AgentRun.__init__` (see L-21).
+4. Curated tool wrappers: DESeq2, STAR, featureCounts SKILL files + Docker integration.
+5. Full dataset (99 problems): requires HuggingFace approval + Azure VM setup
+   (see documents/scaling_with_azure.md).
+6. Groq Dev Tier upgrade: unavailable since ~Apr 2026, no ETA.
 
 ## Blockers / open questions for human
 - hb053 (heat stress) — model cannot identify heat stress from Brachypodium transcriptome;
