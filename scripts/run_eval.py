@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Main CLI for running BioMysteryBench evaluation."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -104,24 +105,63 @@ def load_system_prompt() -> str:
     return "You are an expert computational biologist. Solve the given problem. State your final answer as: FINAL ANSWER: <answer>"
 
 
-def ensure_docker_image(image_name: str, dockerfile_dir: Path) -> None:
-    result = subprocess.run(
+def _compute_build_hash(dockerfile_dir: Path) -> str:
+    """SHA-256 of Dockerfile + all files under docker/ and SKILLS/ (sorted paths)."""
+    h = hashlib.sha256()
+    repo_root = dockerfile_dir.parent
+    paths = sorted(
+        p for p in dockerfile_dir.rglob("*") if p.is_file()
+    ) + sorted(
+        p for p in (repo_root / "SKILLS").rglob("*") if p.is_file()
+    )
+    for p in paths:
+        h.update(p.read_bytes())
+    return h.hexdigest()[:16]
+
+
+def ensure_docker_image(
+    image_name: str, dockerfile_dir: Path, force_rebuild: bool = False
+) -> None:
+    repo_root = dockerfile_dir.parent
+    current_hash = _compute_build_hash(dockerfile_dir)
+    inspect = subprocess.run(
         ["docker", "image", "inspect", image_name],
         capture_output=True,
     )
-    if result.returncode != 0:
+    if inspect.returncode != 0:
         console.print(f"[yellow]Docker image {image_name} not found. Building...[/yellow]")
+        needs_build = True
+    elif force_rebuild:
+        console.print(f"[yellow]--rebuild flag set. Rebuilding {image_name}...[/yellow]")
+        needs_build = True
+    else:
+        stored_hash = subprocess.run(
+            ["docker", "image", "inspect", "--format",
+             "{{index .Config.Labels \"build_hash\"}}", image_name],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        if stored_hash != current_hash:
+            console.print(
+                f"[yellow]Docker image {image_name} is stale "
+                f"(stored hash: {stored_hash!r}, current: {current_hash!r}). "
+                f"Rebuilding...[/yellow]"
+            )
+            needs_build = True
+        else:
+            console.print(f"[green]Docker image {image_name} is up to date.[/green]")
+            needs_build = False
+
+    if needs_build:
         subprocess.run(
             [
                 "docker", "build", "-t", image_name,
+                "--label", f"build_hash={current_hash}",
                 "-f", str(dockerfile_dir / "Dockerfile"),
-                str(dockerfile_dir.parent),
+                str(repo_root),
             ],
             check=True,
         )
         console.print(f"[green]Image {image_name} built successfully.[/green]")
-    else:
-        console.print(f"[green]Docker image {image_name} found.[/green]")
 
 
 def _run_problem(
@@ -283,6 +323,8 @@ def _run_problem(
               help="Directory to write results.")
 @click.option("--no-build", is_flag=True,
               help="Skip Docker image build check.")
+@click.option("--rebuild", is_flag=True,
+              help="Force Docker image rebuild even if hash matches.")
 @click.option("--dataset-path", default=None,
               help="Path to a local JSONL manifest file (overrides --dataset).")
 @click.option("--critic-injection-points", multiple=True,
@@ -294,7 +336,7 @@ def _run_problem(
               help="Maximum number of critic exchanges per run.")
 def main(dataset, model, provider, api_base_url, api_key, judge_model,
          n_attempts, parallel, problem_ids, dry_run, resume, max_cost, max_steps,
-         docker_memory, docker_cpus, results_dir, no_build, dataset_path,
+         docker_memory, docker_cpus, results_dir, no_build, rebuild, dataset_path,
          critic_injection_points, critic_model, max_critic_rounds):
     """Run BioMysteryBench evaluation harness."""
 
@@ -424,7 +466,7 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
     # Ensure Docker image exists
     docker_dir = Path(__file__).parent.parent / "docker"
     if not no_build:
-        ensure_docker_image(config.image_name, docker_dir)
+        ensure_docker_image(config.image_name, docker_dir, force_rebuild=rebuild)
 
     results_path = Path(results_dir)
     results_path.mkdir(parents=True, exist_ok=True)
