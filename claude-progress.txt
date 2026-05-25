@@ -83,6 +83,63 @@ CA (Critic Accuracy) — PR #80 open, pending merge.
   tests/test_critic_grounding.py (new, 3 structural regression tests)
 
 ## Pending slices
+
+### RERUN-6: Qwen3/Cerebras benchmark run (validate all RERUN-5 remediations)
+
+**Goal:** Run 5 preview problems × 5 attempts with Qwen3 on Cerebras, two-round critic
+also on Qwen3/Cerebras. Compare results against RERUN-5 baseline using compare_runs.py.
+
+**Pre-flight checklist (do before launching):**
+1. Merge PR #81 (close-session docs) so main is fully up to date.
+2. Run `git pull origin main` to confirm on latest main.
+3. Run `python scripts/run_eval.py --dry-run ...` (command below) to confirm API key
+   is set and cost estimate is reasonable.
+4. Docker image rebuild: SI hash-gating will trigger automatically on first real run.
+   If you want to rebuild explicitly first:
+   `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .`
+5. Confirm CEREBRAS_API_KEY is set:
+   `set -a && source .env && set +a`
+
+**Run command:**
+```bash
+python scripts/run_eval.py \
+  --provider openai \
+  --api-base-url https://api.cerebras.ai/v1 \
+  --api-key "$CEREBRAS_API_KEY" \
+  --model qwen-3-235b-a22b-instruct-2507 \
+  --critic-model qwen-3-235b-a22b-instruct-2507 \
+  --critic-injection-points after_final_answer \
+  --critic-injection-points after_critic_response \
+  --max-critic-rounds 2 \
+  --dataset preview \
+  --n-attempts 5 \
+  --max-steps 100
+```
+
+**Key corrections vs. earlier notes:**
+- Flag is `--dataset preview` (not `--dataset-split`)
+- `--critic-injection-points` takes one value per flag invocation (repeatable, not space-separated)
+- `--api-key` must be passed explicitly for Cerebras (not auto-detected from env)
+
+**Analysis steps after the run completes:**
+1. Check `results/scores.json` for pass@1 and pass@5 per problem.
+2. Run `python scripts/trajectory_to_md.py results/trajectories/` to generate Markdown summaries.
+3. If a prior RERUN-5 results dir exists, run:
+   `python scripts/compare_runs.py results/ <rerun5-results-dir>/`
+4. For critic hallucination rate, check trajectories for critic responses that cite
+   "Step N says: ..." (CITATION GATE enforcement) vs. uncited concerns.
+5. Focus on hb002 (BLAST PATH issue), recq (genome download), and critic grounding.
+
+**Expected improvements over RERUN-5:**
+- hb002: blast-search SKILL (PATH warning) should stop agent bypassing blast_search tool
+- recq: genome-retrieval SKILL + TM fixes should prevent premature download abandonment
+- Critic: CA CITATION GATE should reduce hallucinated concern rate
+
+**Definition of done:** run completes without harness errors; results/scores.json populated
+for all 5 problems × 5 attempts; trajectory Markdown files generated.
+
+---
+
 - Curated bioinformatics tool wrappers (DESeq2, STAR, featureCounts) — not yet started
 
 ## Documentation
@@ -99,7 +156,7 @@ Walkthroughs in documents/code_walkthroughs/:
 1. Docker image rebuild (after CA merge): `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .`
    SI hash-gating will detect the stale image automatically on next eval run — this is a reminder
    to trigger it before RERUN-6.
-2. RERUN-6: run benchmark with Qwen3/Cerebras against all RERUN-5 remediations merged.
+2. RERUN-6: run benchmark with Qwen3/Cerebras — full spec in Pending slices above.
    Expected improvements: hb002 (blast-search SKILL), recq (genome-retrieval + TM), critic hallucinations (CA).
 3. CI guard: AST-based test that asserts every `self.X` read in `AgentRun._loop` has a matching
    `self.X = …` initialiser in `AgentRun.__init__` (see L-21).
