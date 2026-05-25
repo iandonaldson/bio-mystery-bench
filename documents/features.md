@@ -708,3 +708,31 @@ Implement after SI/SK/SL are merged.
 **Files:** `SKILLS/genome-retrieval/SKILL.md` (new), `SKILLS/ucsc-sequence-fetch/SKILL.md`
 (new), `docker/Dockerfile`, `scripts/smoke_test_container.py`, `prompts/system.txt`,
 `tests/test_agent_helpers.py`
+
+---
+
+## Critic Accuracy Improvements (2026-05-25)
+
+Post-mortem of RERUN-5 trajectories confirmed systematic critic hallucination: in 6+ of 25
+attempts the critic attributed claims to the agent that the agent never made (e.g., stated
+the agent concluded "E. coli" when the agent concluded "B. cereus"). Two structural root causes:
+(1) `_format_trajectory_for_critic()` truncates reasoning blocks to 400 chars and tool output
+to 600 chars — the critic sees only the first sentence or two and must guess the rest; and
+(2) the current `CRITIC_SYSTEM_PROMPT` has no citation requirement — the existing "Do not invent
+claims" line is buried and provides no enforcement mechanism.
+
+Implement after SI/SK/SL/TM/GD are merged (touches `harness/agent.py` and `SKILLS/` only —
+no Docker changes — so can be developed in parallel if needed).
+
+### ⬜ CA: Critic Accuracy (CA-1 to CA-5)
+
+| ID | Scope | Test |
+|----|-------|------|
+| CA-1 | Add CITATION GATE to `CRITIC_SYSTEM_PROMPT` in `harness/agent.py`. Insert immediately after the opening paragraph, before the numbered list: *"CITATION GATE — Before raising any concern, locate the exact agent step where the claim was made. You MUST quote it as: 'Step N says: ...<verbatim>...' If you cannot find the quote in the trajectory above, do not raise the concern. Absence of a citation means the claim is your inference, not the agent's — omit it."* Also remove the current weak end-of-prompt line "Do not invent claims the agent did not make." — replaced by the gate above. | `test_critic_system_prompt_requires_step_citation` — assert `"Step N"` and `"do not raise"` present in `CRITIC_SYSTEM_PROMPT` |
+| CA-2 | Increase truncation limits in `_format_trajectory_for_critic()`: `text[:400]` (AGENT REASONING) → `[:1500]`; `str(result)[:600]` (TOOL RESULT) → `[:2500]`. Also increase `max_tokens=1024` → `max_tokens=2048` in `_run_critic()`. Effect: 20-step run goes from ~9k to ~22k critic input tokens — well within Haiku's 200k context. | `test_format_trajectory_for_critic_reasoning_limit`, `test_format_trajectory_for_critic_tool_result_limit` — construct mock message lists with long blocks; assert new limits applied |
+| CA-3 | Create `SKILLS/critic-guidance/SKILL.md` (host-side only — NOT baked into Docker). Body: (1) citation requirement reiteration, (2) structured output template per concern (`ASSUMPTION [HIGH\|MEDIUM\|LOW]: Agent said (Step N): "<quote>"`), (3) 3-item pre-flight checklist, (4) known RERUN-5 hallucination failure patterns. Add `_load_critic_skill()` helper in `harness/agent.py` that reads this file, strips YAML frontmatter, and returns the body. Call in `_run_critic()`: `system = CRITIC_SYSTEM_PROMPT + self._load_critic_skill()`. | `test_load_critic_skill_appends_to_system_prompt` — temp skill file, assert body appears in system prompt passed to `critic_client.chat()`; `test_load_critic_skill_graceful_when_missing` — assert empty string, no exception |
+| CA-4 | Add CITATION GATE to `CRITIC_FOLLOWUP_PROMPT` for round-2 critiques: *"CITATION GATE — For any NEW concern raised in this review, you must quote the specific step from the agent's most recent response: 'Step N says: ...' Do not introduce concerns about earlier steps unless you now have a verbatim quote."* | `test_critic_followup_prompt_requires_citation` — assert citation language present in `CRITIC_FOLLOWUP_PROMPT` |
+| CA-5 | New test file `tests/test_critic_grounding.py`. Two structural regression tests: (1) assert each AGENT REASONING block in `_format_trajectory_for_critic()` output is ≥ min(len(original), 1500) chars — confirms new truncation limits are respected; (2) assert `_load_critic_skill()` is called and its return value is concatenated onto `CRITIC_SYSTEM_PROMPT` in the actual `_run_critic()` call (mock the helper, verify concatenation). | `test_critic_grounding.py` — 2 tests |
+
+**Files:** `harness/agent.py`, `SKILLS/critic-guidance/SKILL.md` (new),
+`tests/test_agent_helpers.py`, `tests/test_critic_grounding.py` (new)
