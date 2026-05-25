@@ -144,6 +144,13 @@ Distinguish two outcomes — (A) Agent answer appears wrong on the evidence
 which assumption to verify).\
 """
 
+STEP_LIMIT_PROMPT = (
+    "You have reached the step limit. "
+    "You MUST state your best answer immediately. "
+    "Do not call any more tools. "
+    "Respond with only: FINAL ANSWER: <your answer>"
+)
+
 CRITIC_FOLLOWUP_PROMPT = """\
 You previously audited this agent's reasoning. The agent has now responded.
 Review the new tool calls and reasoning since your last critique.
@@ -220,6 +227,7 @@ class AgentRun:
         self._critic_rounds: int = 0
         self._blast_versions: dict[str, str] = {}
         self._final_answer_reprompted: bool = False
+        self._step_limit_prompted: bool = False
 
     def run(self) -> AgentResult:
         start = time.monotonic()
@@ -473,6 +481,81 @@ class AgentRun:
 
                 if tool_results:
                     self.messages.append({"role": "user", "content": tool_results})
+
+                # SL-3: at step limit during tool_use, inject one answer-extraction
+                # prompt and make a single extra API call so the FA + success path
+                # can fire.  Guard prevents re-entry on a second tool_use response.
+                if self.steps >= self.config.max_steps and not self._step_limit_prompted:
+                    self._step_limit_prompted = True
+                    self.messages.append({
+                        "role": "user",
+                        "content": [{"type": "text", "text": STEP_LIMIT_PROMPT}],
+                    })
+                    try:
+                        sl_resp = self.client.chat(
+                            model=self.config.model,
+                            system=self.system_prompt,
+                            messages=self.messages,
+                            tools=[BASH_TOOL, ABORT_TOOL, BLAST_TOOL],
+                            max_tokens=512,
+                            logger=self.logger,
+                        )
+                    except Exception as e:
+                        self.logger.log("error", {"error": str(e)})
+                        return AgentResult(
+                            status="error",
+                            steps=self.steps,
+                            input_tokens=self.input_tokens,
+                            output_tokens=self.output_tokens,
+                            cache_read_tokens=self.cache_read_tokens,
+                            wall_seconds=time.monotonic() - start,
+                            error=str(e),
+                        )
+                    self.input_tokens += sl_resp.usage.input_tokens
+                    self.output_tokens += sl_resp.usage.output_tokens
+                    self.cache_read_tokens += sl_resp.usage.cache_read_tokens
+                    self.cost_tracker.add(
+                        sl_resp.usage.input_tokens,
+                        sl_resp.usage.output_tokens,
+                        sl_resp.usage.cache_read_tokens,
+                    )
+                    self.logger.log("assistant", {
+                        "stop_reason": sl_resp.stop_reason,
+                        "reasoning": sl_resp.text,
+                        "content": sl_resp.raw_content,
+                        "usage": {
+                            "input": sl_resp.usage.input_tokens,
+                            "output": sl_resp.usage.output_tokens,
+                            "cache_read": sl_resp.usage.cache_read_tokens,
+                        },
+                        "step_limit_response": True,
+                    })
+                    self.messages.append({"role": "assistant", "content": sl_resp.raw_content})
+                    self.steps += 1
+
+                    if sl_resp.stop_reason == "end_turn":
+                        # Apply FA marker check (one-shot; no re-prompt at this stage)
+                        if not _has_final_answer_marker(sl_resp.text):
+                            self.logger.log("format_warning", {
+                                "reason": "FINAL ANSWER marker missing in step-limit response",
+                                "text_excerpt": sl_resp.text[:300],
+                            })
+                        self.logger.log("status", {
+                            "status": "success",
+                            "final_message": sl_resp.text,
+                        })
+                        return AgentResult(
+                            status="success",
+                            final_message=sl_resp.text,
+                            steps=self.steps,
+                            input_tokens=self.input_tokens,
+                            output_tokens=self.output_tokens,
+                            cache_read_tokens=self.cache_read_tokens,
+                            wall_seconds=time.monotonic() - start,
+                        )
+
+                    # sl_resp was still tool_use → guard fires on next iteration
+                    return self._result("max_steps", start)
 
         return self._result("error", start)  # unreachable
 
