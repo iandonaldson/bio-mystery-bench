@@ -1505,3 +1505,45 @@ class TestStepLimitExtraction:
         assert client.chat.call_count == 3
         # _step_limit_prompted is True — guard fired
         assert run._step_limit_prompted is True
+
+
+# ---------------------------------------------------------------------------
+# TM: Fix Time/Step Messaging (TM-1 to TM-3)
+# ---------------------------------------------------------------------------
+
+class TestTimeStepMessaging:
+    def _prompt(self):
+        from pathlib import Path
+        return (Path(__file__).parent.parent / "prompts" / "system.txt").read_text()
+
+    # TM-1: "run timeout" abort criterion must be gone
+    def test_system_prompt_does_not_mention_run_timeout(self):
+        assert "run timeout" not in self._prompt()
+
+    # TM-1: no-wall-clock note must be present
+    def test_system_prompt_states_no_wall_clock_time_limit(self):
+        assert "no wall-clock time limit" in self._prompt()
+
+    # TM-2: environment context includes step budget with max_steps value
+    def test_environment_context_includes_step_budget(self):
+        from harness.config import RunConfig
+        config = RunConfig(max_steps=25, step_timeout_seconds=600)
+
+        mock_container = MagicMock()
+        mock_container.exec_command.side_effect = [
+            ("MEM: 4GB\n", "", 0),   # RESOURCE_CHECK_CMD
+            ("", "", 0),              # ls /workspace/skills/
+        ]
+        run = AgentRun.__new__(AgentRun)
+        run.container = mock_container
+        run.logger = MagicMock()
+        run.config = config
+
+        ctx = run._get_environment_context()
+        assert "25" in ctx          # max_steps value appears
+        assert "600" in ctx         # step_timeout_seconds value appears
+        assert "Step budget" in ctx
+
+    # TM-3: softened ≥75% WARNING must mention in-progress work
+    def test_system_prompt_warning_threshold_mentions_in_progress_work(self):
+        assert "already underway" in self._prompt()

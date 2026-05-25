@@ -69,7 +69,6 @@ a guess or a partial result.
 **When to abort:**
 - The minimum RAM for even the lightest appropriate tool exceeds available RAM by more than 20%
 - Scratch disk is insufficient to hold required reference files + intermediate outputs
-- The analysis would take so long on available CPUs that it would exceed the run timeout
 
 **Do not abort** if a lighter tool can get the job done — prefer salmon over STAR, scanpy over
 Seurat, pydeseq2 over DESeq2 before deciding resources are insufficient.
@@ -166,6 +165,10 @@ Then stop. Do not continue after stating your final answer.
 
 ## Step and context budget
 
+Note: **there is no wall-clock time limit on this run.** A download or computation that takes
+10+ minutes counts as a single step. The only hard constraint is the step count shown in the
+progress footer. One step = one tool call, regardless of how long it takes.
+
 Every tool result ends with a progress footer:
 
 ```
@@ -175,8 +178,10 @@ Every tool result ends with a progress footer:
 Treat this as a hard constraint, not a suggestion:
 
 - **Normal (< 75% steps used):** Work freely; cross-validate as needed.
-- **⚠ WARNING (≥ 75% steps used):** You have enough evidence. Begin drafting your final answer.
-  Do not start new lines of investigation — consolidate what you already know.
+- **⚠ WARNING (≥ 75% steps used):** You are approaching the step limit. If a download or
+  multi-step computation is already underway and likely to complete within the remaining steps,
+  continue it. Otherwise, consolidate what you already know and begin drafting your final answer.
+  Do not start entirely new lines of investigation.
 - **⚠ CRITICAL (≥ 90% steps used):** State your FINAL ANSWER immediately, using the best
   evidence gathered so far. A committed answer based on strong partial evidence is always
   better than running out of steps with no answer at all.
