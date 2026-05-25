@@ -658,6 +658,15 @@ class AgentRun:
         else:
             context += "\n\n## Available bio method recipes\n(none — /workspace/skills/ is empty)"
 
+        # TM-2: inject step budget so agents know the hard limit from step 1
+        context += (
+            f"\n\n## Step budget\n"
+            f"Step budget: {self.config.max_steps} steps total "
+            f"(1 tool call = 1 step, regardless of wall time)\n"
+            f"Per-command timeout: {self.config.step_timeout_seconds}s "
+            f"(downloads may use this fully — it is fine)"
+        )
+
         return context
 
     def _result(self, status: str, start: float) -> AgentResult:
