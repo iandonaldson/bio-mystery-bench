@@ -1,11 +1,9 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-25 — Close-session reconciliation pass after SI/SK/SL/TM/GD/CA (PRs #75–#80).
-Updated features.md (fixed 5 drift points in CA/GD/SK sub-slice descriptions and test
-names), added L-25 to code-learnings, wrote walkthrough
-documents/code_walkthroughs/12.rerun5_remediations.md, updated README (--rebuild flag
-and References). Test count unchanged at 341/342.
+2026-05-25 — Post-merge fixup: PR #81 (close-session) merged. Cleared stale CA/PR #80
+"pending merge" references, added detailed RERUN-6 pending slice, removed resolved Docker
+rebuild blocker. All PRs #1–#81 now on main; RERUN-6 is next.
 
 ## Current status
 All planned RERUN-5 infrastructure remediations and post-mortem improvements are
@@ -13,7 +11,7 @@ implemented. Harness is fully functional with Anthropic, Groq, and Cerebras prov
 Ready for a RERUN-6 benchmark run to validate all improvements end-to-end.
 
 ## Active feature slice
-CA (Critic Accuracy) — PR #80 open, pending merge.
+RERUN-6 — Qwen3/Cerebras benchmark run (next up; see Pending slices for full spec).
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
@@ -76,13 +74,66 @@ CA (Critic Accuracy) — PR #80 open, pending merge.
   SKILLS/ucsc-sequence-fetch/SKILL.md (UCSC REST API for ≤50 intervals)
   SKILLS/blast-search/SKILL.md (PATH warning + species ID + empty-results troubleshooting)
   Dockerfile COPY directives (5 skill files total); smoke test count 2→5; system prompt pointers
-- CA: Critic Accuracy — CA-1..5 (PR #80, pending merge)
+- CA: Critic Accuracy — CA-1..5 (PR #80)
   CITATION GATE in CRITIC_SYSTEM_PROMPT + CRITIC_FOLLOWUP_PROMPT;
   truncation limits 400→1500 (reasoning), 600→2500 (tool result); max_tokens 1024→2048;
   SKILLS/critic-guidance/SKILL.md + _load_critic_skill() helper injected into _run_critic();
   tests/test_critic_grounding.py (new, 3 structural regression tests)
+- Close-session docs reconciliation (PR #81)
+  features.md drift fixes; L-25 in code-learnings; walkthrough 12.rerun5_remediations.md;
+  README --rebuild flag + References
 
 ## Pending slices
+
+### RERUN-6: Qwen3/Cerebras benchmark run (validate all RERUN-5 remediations)
+
+**Goal:** Run 5 preview problems × 5 attempts with Qwen3 on Cerebras, two-round critic
+also on Qwen3/Cerebras. Compare results against RERUN-5 baseline using compare_runs.py.
+
+**Pre-flight checklist (do before launching):**
+1. Run `git pull origin main` to confirm on latest main.
+2. Confirm CEREBRAS_API_KEY is set: `set -a && source .env && set +a`
+3. Dry-run to check API key and cost estimate:
+   `python scripts/run_eval.py --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key "$CEREBRAS_API_KEY" --model qwen-3-235b-a22b-instruct-2507 --dataset preview --n-attempts 5 --max-steps 100 --dry-run`
+4. Docker image rebuild: SI hash-gating will trigger automatically on first real run
+   (all 5 skill files changed since last build). Explicit rebuild if preferred:
+   `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .`
+
+**Run command:**
+```bash
+python scripts/run_eval.py \
+  --provider openai \
+  --api-base-url https://api.cerebras.ai/v1 \
+  --api-key "$CEREBRAS_API_KEY" \
+  --model qwen-3-235b-a22b-instruct-2507 \
+  --critic-model qwen-3-235b-a22b-instruct-2507 \
+  --critic-injection-points after_final_answer \
+  --critic-injection-points after_critic_response \
+  --max-critic-rounds 2 \
+  --dataset preview \
+  --n-attempts 5 \
+  --max-steps 100
+```
+
+**Analysis steps after the run completes:**
+1. Check `results/scores.json` for pass@1 and pass@5 per problem.
+2. Run `python scripts/trajectory_to_md.py results/trajectories/` to generate Markdown summaries.
+3. If a prior RERUN-5 results dir exists, run:
+   `python scripts/compare_runs.py results/ <rerun5-results-dir>/`
+4. For critic hallucination rate, check trajectories for critic responses that cite
+   "Step N says: ..." (CITATION GATE enforcement) vs. uncited concerns.
+5. Focus on hb002 (BLAST PATH issue), recq (genome download), and critic grounding.
+
+**Expected improvements over RERUN-5:**
+- hb002: blast-search SKILL (PATH warning) should stop agent bypassing blast_search tool
+- recq: genome-retrieval SKILL + TM fixes should prevent premature download abandonment
+- Critic: CA CITATION GATE should reduce hallucinated concern rate
+
+**Definition of done:** run completes without harness errors; results/scores.json populated
+for all 5 problems × 5 attempts; trajectory Markdown files generated.
+
+---
+
 - Curated bioinformatics tool wrappers (DESeq2, STAR, featureCounts) — not yet started
 
 ## Documentation
@@ -96,17 +147,14 @@ Walkthroughs in documents/code_walkthroughs/:
 - 12.rerun5_remediations.md — RERUN-5 harness remediations (SI/SK/SL/TM/GD/CA)
 
 ## Next steps (in priority order)
-1. Docker image rebuild (after CA merge): `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .`
-   SI hash-gating will detect the stale image automatically on next eval run — this is a reminder
-   to trigger it before RERUN-6.
-2. RERUN-6: run benchmark with Qwen3/Cerebras against all RERUN-5 remediations merged.
-   Expected improvements: hb002 (blast-search SKILL), recq (genome-retrieval + TM), critic hallucinations (CA).
-3. CI guard: AST-based test that asserts every `self.X` read in `AgentRun._loop` has a matching
+1. RERUN-6: run benchmark with Qwen3/Cerebras — full spec in Pending slices above.
+   Docker rebuild will trigger automatically via SI hash-gating on first eval run.
+2. CI guard: AST-based test that asserts every `self.X` read in `AgentRun._loop` has a matching
    `self.X = …` initialiser in `AgentRun.__init__` (see L-21).
-4. Curated tool wrappers: DESeq2, STAR, featureCounts SKILL files + Docker integration.
-5. Full dataset (99 problems): requires HuggingFace approval + Azure VM setup
+3. Curated tool wrappers: DESeq2, STAR, featureCounts SKILL files + Docker integration.
+4. Full dataset (99 problems): requires HuggingFace approval + Azure VM setup
    (see documents/scaling_with_azure.md).
-6. Groq Dev Tier upgrade: unavailable since ~Apr 2026, no ETA.
+5. Groq Dev Tier upgrade: unavailable since ~Apr 2026, no ETA.
 
 ## Blockers / open questions for human
 - hb053 (heat stress) — model cannot identify heat stress from Brachypodium transcriptome;
@@ -114,8 +162,8 @@ Walkthroughs in documents/code_walkthroughs/:
 - Full 99-problem dataset requires HuggingFace approval
 - Groq Dev Tier upgrades temporarily unavailable (since ~Apr 2026, no ETA)
 - Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md
-- Docker image rebuild needed after CA merge: all 5 skill files need the image rebuilt
-  (SI hash-gating will detect the stale image automatically on next eval run)
+- Docker image rebuild needed before RERUN-6: CA + GD added 5 skill files since last build.
+  SI hash-gating will detect and trigger rebuild automatically on first eval run.
 
 ## Test status
 341/342 passing on claude/ca-critic-accuracy-v2 branch (1 pre-existing failure in
@@ -148,4 +196,4 @@ New tests this session:
   * hb002: blast-search SKILL should prevent agent bypassing blast_search tool
   * recq: genome-retrieval + TM fixes should prevent premature download abandonment
   * Critic: CA fixes should reduce hallucination rate in critic responses
-- All fixes in PRs #1–#79 merged to main; PR #80 (CA) pending merge
+- All fixes in PRs #1–#81 merged to main
