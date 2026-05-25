@@ -1222,9 +1222,10 @@ class TestSystemPromptMethodAdvice:
     def test_system_prompt_mentions_workspace_skills_directory(self):
         text = SYSTEM_PROMPT_PATH.read_text()
         # The Environment details section must tell the agent where to find
-        # the in-container recipes and how to list them.
+        # the in-container recipes. SK-2 replaced the manual `ls` instruction
+        # with a reference to the environment context (injected by the harness).
         assert "/workspace/skills/" in text
-        assert "ls /workspace/skills/" in text
+        assert "environment context" in text
 
 
 # ---------------------------------------------------------------------------
@@ -1307,3 +1308,64 @@ class TestCriticPromptAlternatives:
     def test_critic_injection_wrapper_mentions_alternatives_testing(self):
         result = _format_critic_injection("dummy")
         assert "test the one with the strongest evidence support" in result
+
+
+# ---------------------------------------------------------------------------
+# SK: Auto-inject skills directory into environment context (SK-1 to SK-2)
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace
+
+
+def _make_agent_run_for_sk(skills_listing):
+    """Build a minimal AgentRun-like object whose _get_environment_context can be called."""
+    import harness.config as cfg_mod
+    config = cfg_mod.RunConfig()
+
+    mock_container = MagicMock()
+    # First call → resource check (RESOURCE_CHECK_CMD)
+    # Second call → ls /workspace/skills/
+    mock_container.exec_command.side_effect = [
+        ("MEM: 4GB\nCPU: 2", "", 0),
+        (skills_listing, "", 0),
+    ]
+
+    mock_logger = MagicMock()
+    mock_client = MagicMock()
+
+    run = AgentRun.__new__(AgentRun)
+    run.container = mock_container
+    run.logger = mock_logger
+    run.client = mock_client
+    run.config = config
+    # AgentRun attributes needed by _get_environment_context (none beyond container/logger)
+    return run
+
+
+class TestEnvironmentContextSkillsInjection:
+    def test_environment_context_includes_skills_listing(self):
+        """SK-1: two skill filenames from ls appear in the returned context string."""
+        run = _make_agent_run_for_sk(
+            "deg-functional-enrichment.md\nchipseq-tf-identification.md"
+        )
+        ctx = run._get_environment_context()
+        assert "deg-functional-enrichment.md" in ctx
+        assert "chipseq-tf-identification.md" in ctx
+        assert "Available bio method recipes" in ctx
+
+    def test_environment_context_handles_empty_skills_dir(self):
+        """SK-1: empty ls output → explicit (none) message rather than blank section."""
+        run = _make_agent_run_for_sk("")
+        ctx = run._get_environment_context()
+        assert "Available bio method recipes" in ctx
+        assert "(none" in ctx
+
+
+class TestSystemPromptSkillsDiscovery:
+    def test_system_prompt_does_not_tell_agent_to_ls_skills(self):
+        """SK-2: old 'Run `ls /workspace/skills/`' instruction must be gone."""
+        from pathlib import Path
+        prompt = (Path(__file__).parent.parent / "prompts" / "system.txt").read_text()
+        assert "Run `ls /workspace/skills/`" not in prompt
+        # The new instruction should mention environment context
+        assert "environment context" in prompt

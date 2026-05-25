@@ -40,7 +40,14 @@ CHECKS = [
      "skill: deg-functional-enrichment"),
     ("test -f /workspace/skills/chipseq-tf-identification.md && echo present",
      "skill: chipseq-tf-identification"),
+    # SK-3: verify exactly 2 skill files are present (update count as GD adds more)
+    ("ls /workspace/skills/ | wc -l | tr -d ' '", "skills dir file count == 2"),
 ]
+
+# Expected output for count-check assertions (label → expected stdout)
+_EXPECTED = {
+    "skills dir file count == 2": "2",
+}
 
 
 def run_checks() -> bool:
@@ -54,10 +61,15 @@ def run_checks() -> bool:
     with container:
         for cmd, label in CHECKS:
             stdout, stderr, rc = container.exec_command(cmd, timeout=30)
-            status = "PASS" if rc == 0 else "FAIL"
-            if rc != 0:
-                all_passed = False
             output = (stdout or stderr or "").strip().split("\n")[0]
+            # For count-check assertions, compare output against expected value
+            if label in _EXPECTED:
+                passed = (output == _EXPECTED[label])
+            else:
+                passed = (rc == 0)
+            status = "PASS" if passed else "FAIL"
+            if not passed:
+                all_passed = False
             print(f"[{status}] {label}: {output!r}")
 
     return all_passed
