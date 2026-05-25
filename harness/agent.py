@@ -559,7 +559,23 @@ class AgentRun:
             output = f"(resource check failed: {e})"
 
         self.logger.log("environment", {"resource_snapshot": output})
-        return f"## Container environment\n\n```\n{output}\n```"
+        context = f"## Container environment\n\n```\n{output}\n```"
+
+        # SK-1: inject skills directory listing so agents see available recipes immediately
+        try:
+            skills_stdout, _err, _rc = self.container.exec_command(
+                "ls /workspace/skills/ 2>/dev/null || true", timeout=10
+            )
+            listing = skills_stdout.strip()
+        except Exception:
+            listing = ""
+
+        if listing:
+            context += f"\n\n## Available bio method recipes\n{listing}"
+        else:
+            context += "\n\n## Available bio method recipes\n(none — /workspace/skills/ is empty)"
+
+        return context
 
     def _result(self, status: str, start: float) -> AgentResult:
         last_assistant = ""
