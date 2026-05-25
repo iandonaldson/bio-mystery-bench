@@ -162,7 +162,7 @@ sub-slice breakdown (SI-1 to SI-4).
 - SK: Auto-inject Skills Directory into Environment Context (SK-1 to SK-3) — push `ls /workspace/skills/` into initial user message
 - SL: Step-limit Answer Extraction (SL-1 to SL-4) — inject STEP_LIMIT_PROMPT when max_steps hit during tool_use
 - TM: Fix Time/Step Messaging (TM-1 to TM-3) — remove "run timeout" language; show max_steps in environment context; soften ≥75% WARNING for in-progress work
-- GD: Genome Download Skills (GD-1 to GD-4) — background-download skill (EBI/Gencode URL + PID polling); UCSC REST API skill for ≤50 intervals; bake both into Docker image
+- GD: Genome Download Skills (GD-1 to GD-5) — background-download skill (EBI/Gencode URL + PID polling); UCSC REST API skill for ≤50 intervals; BLAST search skill (blastn not in bash PATH — always use blast_search tool); bake all three into Docker image
 - CA: Critic Accuracy Improvements (CA-1 to CA-5) — citation gate in CRITIC_SYSTEM_PROMPT + CRITIC_FOLLOWUP_PROMPT; increase truncation limits (400→1500 reasoning, 600→2500 tool output); create SKILLS/critic-guidance/SKILL.md (host-only, injected into critic API calls); 2 new test files
 - Curated bioinformatics tools (structured wrappers for DESeq2, STAR, featureCounts)
 
@@ -249,6 +249,12 @@ sub-slice breakdown (SI-1 to SI-4).
 - Parallel-agent workflow note: when multiple agents touch AgentRun.__init__ in
   parallel branches, run the full suite after each merge — PR #58 referenced
   `_final_answer_reprompted` without initialising it, broke 4 tests until PR #59 fixed it.
+- hb002 regression (GD-5): confirmed root cause — agent calls `blastn -version` directly
+  in bash → "command not found" → incorrectly concludes BLAST unavailable, despite having
+  used `blast_search` tool successfully earlier in the same trajectory. Fix: SKILL file
+  (`SKILLS/blast-search/SKILL.md`) explaining blastn is not in bash PATH and providing
+  correct recipes. SKILL approach preferred over PATH fix (risks context-flooding from raw
+  tabular output) or system prompt rule alone (not discoverable mid-run). Added as GD-5.
 - CA (Critic Accuracy): root causes of RERUN-5 critic hallucination confirmed — (1)
   `_format_trajectory_for_critic()` truncates reasoning to 400 chars (too short); (2)
   CRITIC_SYSTEM_PROMPT has no citation requirement. Fix: add CITATION GATE ("Step N says:
