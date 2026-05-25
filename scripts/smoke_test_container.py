@@ -40,13 +40,20 @@ CHECKS = [
      "skill: deg-functional-enrichment"),
     ("test -f /workspace/skills/chipseq-tf-identification.md && echo present",
      "skill: chipseq-tf-identification"),
-    # SK-3: verify exactly 2 skill files are present (update count as GD adds more)
-    ("ls /workspace/skills/ | wc -l | tr -d ' '", "skills dir file count == 2"),
+    # GD-3: three new skill files added by GD slice
+    ("test -f /workspace/skills/genome-retrieval.md && echo present",
+     "skill: genome-retrieval"),
+    ("test -f /workspace/skills/ucsc-sequence-fetch.md && echo present",
+     "skill: ucsc-sequence-fetch"),
+    ("test -f /workspace/skills/blast-search.md && echo present",
+     "skill: blast-search"),
+    # SK-3 (updated by GD-3): verify exactly 5 skill files are present
+    ("ls /workspace/skills/ | wc -l | tr -d ' '", "skills dir file count == 5"),
 ]
 
 # Expected output for count-check assertions (label → expected stdout)
 _EXPECTED = {
-    "skills dir file count == 2": "2",
+    "skills dir file count == 5": "5",
 }
 
 

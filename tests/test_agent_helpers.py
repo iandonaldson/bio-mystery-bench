@@ -1547,3 +1547,107 @@ class TestTimeStepMessaging:
     # TM-3: softened ≥75% WARNING must mention in-progress work
     def test_system_prompt_warning_threshold_mentions_in_progress_work(self):
         assert "already underway" in self._prompt()
+
+
+# ---------------------------------------------------------------------------
+# GD: Genome Download Skills (GD-1 to GD-5)
+# ---------------------------------------------------------------------------
+
+import re as _re
+from pathlib import Path as _Path
+
+_SKILLS_ROOT = _Path(__file__).parent.parent / "SKILLS"
+
+
+def _parse_frontmatter(text):
+    """Return the YAML frontmatter dict (keys only) from a SKILL.md file."""
+    m = _re.match(r"^---\n(.*?)\n---", text, _re.DOTALL)
+    if not m:
+        return {}
+    block = m.group(1)
+    keys = {}
+    for line in block.splitlines():
+        if ":" in line:
+            k = line.split(":")[0].strip()
+            keys[k] = True
+    return keys
+
+
+class TestSkillFileGenomeRetrieval:
+    """GD-1: SKILLS/genome-retrieval/SKILL.md well-formedness."""
+
+    def _text(self):
+        return (_SKILLS_ROOT / "genome-retrieval" / "SKILL.md").read_text()
+
+    def test_has_yaml_frontmatter_with_name_and_description(self):
+        fm = _parse_frontmatter(self._text())
+        assert "name" in fm
+        assert "description" in fm
+
+    def test_has_recipe_a_heading(self):
+        assert "Recipe A" in self._text()
+
+    def test_has_recipe_b_heading(self):
+        assert "Recipe B" in self._text()
+
+    def test_mentions_ebi_gencode_url(self):
+        assert "ftp.ebi.ac.uk" in self._text()
+
+    def test_mentions_background_download_pattern(self):
+        text = self._text()
+        assert "nohup" in text or "background" in text.lower()
+
+
+class TestSkillFileUcscFetch:
+    """GD-2: SKILLS/ucsc-sequence-fetch/SKILL.md well-formedness."""
+
+    def _text(self):
+        return (_SKILLS_ROOT / "ucsc-sequence-fetch" / "SKILL.md").read_text()
+
+    def test_has_yaml_frontmatter_with_name_and_description(self):
+        fm = _parse_frontmatter(self._text())
+        assert "name" in fm
+        assert "description" in fm
+
+    def test_mentions_ucsc_api_endpoint(self):
+        assert "api.genome.ucsc.edu" in self._text()
+
+    def test_mentions_fetch_sequence_function(self):
+        assert "fetch_sequence" in self._text()
+
+
+class TestSkillFileBlastSearch:
+    """GD-5: SKILLS/blast-search/SKILL.md well-formedness."""
+
+    def _text(self):
+        return (_SKILLS_ROOT / "blast-search" / "SKILL.md").read_text()
+
+    def test_has_yaml_frontmatter_with_name_and_description(self):
+        fm = _parse_frontmatter(self._text())
+        assert "name" in fm
+        assert "description" in fm
+
+    def test_has_bash_path_warning(self):
+        text = self._text()
+        assert "not in" in text.lower() or "NOT in" in text
+        assert "PATH" in text
+
+    def test_mentions_blast_search_tool(self):
+        assert "blast_search" in self._text()
+
+
+class TestSystemPromptGenomeAndBlastPointers:
+    """GD-4 / GD-5: system prompt mentions the new skills."""
+
+    def _prompt(self):
+        from pathlib import Path
+        return (Path(__file__).parent.parent / "prompts" / "system.txt").read_text()
+
+    def test_system_prompt_mentions_genome_retrieval_skill(self):
+        assert "genome-retrieval" in self._prompt()
+
+    def test_system_prompt_mentions_ucsc_sequence_fetch_skill(self):
+        assert "ucsc-sequence-fetch" in self._prompt()
+
+    def test_system_prompt_mentions_blast_search_skill(self):
+        assert "blast-search" in self._prompt()
