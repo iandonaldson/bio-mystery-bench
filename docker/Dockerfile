@@ -30,6 +30,7 @@ RUN micromamba install -y -n base \
     salmon \
     kallisto \
     minimap2 \
+    blast \
     r-base=4.3 \
     bioconductor-deseq2 \
     bioconductor-edger \

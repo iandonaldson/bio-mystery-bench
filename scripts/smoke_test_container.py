@@ -49,6 +49,8 @@ CHECKS = [
      "skill: blast-search"),
     # SK-3 (updated by GD-3): verify exactly 5 skill files are present
     ("ls /workspace/skills/ | wc -l | tr -d ' '", "skills dir file count == 5"),
+    # BF-1/BF-3: verify blastn binary is installed and callable
+    ("blastn -version", "blastn binary installed"),
 ]
 
 # Expected output for count-check assertions (label → expected stdout)

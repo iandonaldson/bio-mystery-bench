@@ -1,40 +1,36 @@
 ---
 name: blast-search
 description: >
-  Critical guidance for running BLAST searches in the BioMysteryBench container.
-  blastn/blastp are NOT in the container bash PATH — always use the blast_search
-  tool call, never a direct bash invocation. Includes recipes for 16S rRNA species
-  ID and empty-results troubleshooting.
+  Guidance for running BLAST searches in the BioMysteryBench container.
+  Always use the blast_search tool call (not direct bash) so that large
+  tabular output stays out of the context window. Includes recipes for
+  16S rRNA species ID and empty-results troubleshooting.
 ---
 
 # blast-search skill
 
-## ⚠ CRITICAL — blastn/blastp are NOT in the bash PATH
+## Use blast_search tool — not direct bash
 
-`blastn`, `blastp`, and other BLAST executables are **not** available as bash
-commands in this container. Calling them directly in bash will fail:
+`blastn`, `blastp`, and other BLAST executables are installed at
+`/opt/conda/bin/` and available on `$PATH`. However, **always use the
+`blast_search` tool call** (not a direct bash invocation) because:
+
+- The tool saves full tabular output to `/workspace/scratch/blast_results.txt`
+  and returns only a compact summary, keeping large output out of the context window.
+- Piping BLAST output in bash can silently swallow error exit codes.
 
 ```bash
-# ❌ WRONG — will return "command not found":
-blastn -query /workspace/scratch/query.fa -db nt -remote
-
-# ❌ WRONG — will also fail ("command not found"):
-blastn -version
+# ❌ AVOID — raw bash blast call risks swallowed errors and floods context:
+blastn -query /workspace/scratch/query.fa -db nt -remote -outfmt 6
 
 # ✅ CORRECT — always use the blast_search tool call:
 ```
 
 Use the `blast_search` tool (available in your tool list) for all BLAST queries.
-It runs BLAST internally, saves full tabular output to
-`/workspace/scratch/blast_results.txt`, and returns a compact hit summary.
 
-To verify BLAST is working (instead of `blastn -version` in bash), make a small
-test tool call:
-
-```
-blast_search(query="/workspace/scratch/test.fa", database="nt", program="blastn",
-             max_hits=1)
-```
+To verify BLAST is working, run `blastn -version` in bash — it should print
+the version string. If the tool call returns "binary not found", rebuild the
+Docker image (`--rebuild` flag).
 
 ---
 
