@@ -706,6 +706,8 @@ Implement after SI/SK/SL are merged.
 | GD-4 | Append to `prompts/system.txt` §"Environment details": *"For reference genome retrieval, use the background-download pattern in `/workspace/skills/genome-retrieval.md` (preferred: EBI/Gencode URL). For targeted sequence extraction of ≤50 intervals without downloading a full genome, see `/workspace/skills/ucsc-sequence-fetch.md`."* | `test_system_prompt_mentions_genome_retrieval_skill` — assert `"genome-retrieval"` present |
 | GD-5 | Create `SKILLS/blast-search/SKILL.md`. Sections: (1) **Critical** — `blastn`/`blastp` are NOT in the container bash PATH; always use the `blast_search` tool call, never a direct bash invocation; include ✅/❌ example; note that `blastn -version` in bash will fail — use a small test tool call to verify instead. (2) **Species ID from 16S rRNA** — extract region → save FASTA → call `blast_search` with `extra_args="-task blastn-short"`. (3) **Empty results troubleshooting** — try blastn-short, relax evalue, trim N-runs, try blastx. (4) **Context window note** — full tabular output saved to `/workspace/scratch/blast_results.txt`; tool returns compact summary. Add `COPY SKILLS/blast-search/SKILL.md /workspace/skills/blast-search.md` to `docker/Dockerfile`. Extend smoke test from 4 → 5 skill files; update SK-3 exact-count from 4 → 5. Add system prompt pointer: *"For BLAST sequence searches, use the `blast_search` tool — do not call blastn/blastp directly in bash (not in PATH). See `/workspace/skills/blast-search.md` for recipes and empty-results troubleshooting."* | `test_skill_file_blast_search_has_frontmatter_and_bash_warning` — assert YAML frontmatter, assert body contains PATH warning and `"blast_search"`; `test_system_prompt_mentions_blast_search_skill` — assert `"blast-search"` present in `prompts/system.txt` |
 
+**Note on GD-5 SKILL.md (updated by BF-4, 2026-05-26):** The original `SKILLS/blast-search/SKILL.md` contained "NOT in PATH" guidance because BLAST+ was never installed in the Dockerfile. BF-1 added `blast` to the micromamba install; BF-4 rewrote the SKILL.md to say BLAST IS available at `/opt/conda/bin/` but that agents should still use the `blast_search` tool call (not direct bash) because: (a) the tool saves full output to scratch and returns a compact summary, (b) piping BLAST output in bash can silently swallow error exit codes. The unit test was renamed from `test_skill_file_blast_search_has_frontmatter_and_bash_warning` to `TestSkillFileBlastSearch::test_has_use_tool_guidance`. See BF section below.
+
 **Files:** `SKILLS/genome-retrieval/SKILL.md` (new), `SKILLS/ucsc-sequence-fetch/SKILL.md`
 (new), `SKILLS/blast-search/SKILL.md` (new), `docker/Dockerfile`,
 `scripts/smoke_test_container.py`, `prompts/system.txt`, `tests/test_agent_helpers.py`
@@ -737,3 +739,59 @@ no Docker changes — so can be developed in parallel if needed).
 
 **Files:** `harness/agent.py`, `SKILLS/critic-guidance/SKILL.md` (new),
 `tests/test_agent_helpers.py`, `tests/test_critic_grounding.py` (new)
+
+---
+
+## ✅ RERUN-6: Qwen3/Cerebras Validation Run (2026-05-26)
+
+Benchmark run to validate all RERUN-5 remediations (SI/SK/SL/TM/GD/CA) end-to-end.
+5 preview problems × 5 attempts, Qwen3-235B-A22B on Cerebras, two-round critic (also Qwen3/Cerebras).
+Required two Docker Desktop restarts during the run (Docker became unresponsive mid-run).
+
+**Results (pre-BLAST-fix; BLAST binary still missing in Docker image at run time):**
+
+| Problem | pass@5 | Notes |
+|---------|--------|-------|
+| hb002 (Bacillus BLAST ID) | 0/5 | BLAST tool returned "No hits" on all 5 attempts — root cause: binary missing |
+| hb022 (pancreatic samples) | 3/5 | SC-1 fix vindicated: attempt 1 correctly scored with underscore preserved |
+| hb053 (heat stress) | 0/5 | human_solvable=False; model guesses wrong stressor |
+| hb020 (Homo sapiens PDB) | TBD | |
+| recq (CTCF motif) | TBD | |
+
+**BLAST failure discovery:** hb002 attempt 3 used `Bio.Blast.NCBIWWW.qblast()` directly (bypassing the
+harness tool) and confirmed 100% identity to *Bacillus sp. H15-1* (CP018249.1). This proved the network
+was fine and the sequence was correct — the harness `blast_search` tool was the only broken piece.
+Three-layer failure: (1) `blast` never added to Dockerfile; (2) `blastn ... | tee file` silently returns
+rc=0 via `tee` even when `blastn` exits rc=127; (3) `_summarize_blast_output()` then emits "No hits".
+Diagnosed and fixed in BF-1..4 (PR #83, merged 2026-05-26).
+
+Sub-slices:
+- RERUN-6-1 ✅: Pre-flight confirmed (API key, model, dry-run cost estimate)
+- RERUN-6-2 ✅: Run completed; `results/rerun6/scores.json` populated for all 5 problems × 5 attempts
+- RERUN-6-3 ✅: Trajectory Markdown generated (`results/rerun6/trajectories/*.md`)
+- RERUN-6-4 ✅: BLAST failure diagnosed (see BF section below); walkthrough 13 written
+
+**Definition of done:** met — `scores.json` populated for all 5 problems × 5 attempts; trajectory
+Markdown files generated. BLAST fix (BF PR #83) merged before session close.
+
+---
+
+## ✅ BLAST Fixes (BF-1 to BF-4, PR #83, 2026-05-26)
+
+Four sub-slices to fix the three-layer BLAST failure discovered during RERUN-6.
+
+### ✅ BF: BLAST+ Install + Silent Failure Remediation (BF-1 to BF-4)
+
+| ID | Scope | Test |
+|----|-------|------|
+| BF-1 | Add `blast \` to the micromamba install block in `docker/Dockerfile` (after `minimap2 \`). Update `BASH_TOOL` description in `harness/agent.py` to list `blast (blastn/blastp/blastx)` as a pre-installed tool. | `TestBlastInDockerfile::test_dockerfile_installs_blast` — assert `blast` appears in Dockerfile micromamba block; `TestBlastInDockerfile::test_bash_tool_description_mentions_blast` — assert `BASH_TOOL` description contains `"blast"` |
+| BF-2 | Fix silent failure in `blast_search` dispatch in `harness/agent.py`. Pre-check binary with `_get_blast_version()` before running. If binary absent, immediately return a clear error with install hint (skip running blast entirely via `continue`). Add `set -o pipefail; ` prefix to the blast command so pipe errors propagate even if the pre-check is bypassed. | `TestBlastMissingBinaryPreCheck::test_missing_binary_returns_error_not_no_hits` — mock container returns `""` from `_get_blast_version`; assert tool_result contains "not found" not "No hits"; `test_missing_binary_does_not_run_blast_command` — assert no subsequent exec_command blast invocation; `test_blast_command_uses_pipefail` — assert the blast command string contains `"set -o pipefail"` |
+| BF-3 | Add `_preflight_container_tools(image_name)` to `scripts/run_eval.py`. Starts a throwaway container via `docker.from_env()` and runs `blastn -version 2>&1; echo rc=$?` for each required binary. If any check returns `rc=0` missing from output, print a red error and `sys.exit(1)`. Also extend `scripts/smoke_test_container.py` with `("blastn -version", "blastn binary installed")` check. | `TestPreflightContainerTools::test_preflight_exits_when_blastn_missing` — mock container run returns output without `"rc=0"`; assert `sys.exit(1)` called; `test_preflight_passes_when_blastn_present` — mock returns `"blastn: 2.16.0\nrc=0"`; assert no exit called |
+| BF-4 | Rewrite `SKILLS/blast-search/SKILL.md` — remove "NOT in PATH" guidance (obsolete after BF-1), replace with "BLAST is installed at `/opt/conda/bin/` and available on `$PATH`, but always use the `blast_search` tool call (not direct bash) because the tool keeps large output out of the context window and piping blast output in bash can swallow error exit codes." Add code-learnings L-26 (bash pipeline exit code swallowing). | `TestSkillFileBlastSearch::test_has_use_tool_guidance` (renamed from `test_has_bash_path_warning`) — assert YAML frontmatter, assert body contains `"blast_search"` and `"tool"` |
+
+**Files:** `docker/Dockerfile`, `harness/agent.py`, `scripts/run_eval.py`,
+`scripts/smoke_test_container.py`, `SKILLS/blast-search/SKILL.md`,
+`.claude/skills/code-learnings/SKILL.md`, `tests/test_agent_helpers.py`
+
+**New tests:** 7 (3 `TestBlastMissingBinaryPreCheck`, 2 `TestBlastInDockerfile`, 2 `TestPreflightContainerTools`).
+Test count after merge: 348/349 (1 pre-existing failure in `TestFindDataCache::test_returns_none_when_missing`).
