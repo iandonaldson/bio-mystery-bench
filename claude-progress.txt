@@ -1,17 +1,20 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-25 — Post-merge fixup: PR #81 (close-session) merged. Cleared stale CA/PR #80
-"pending merge" references, added detailed RERUN-6 pending slice, removed resolved Docker
-rebuild blocker. All PRs #1–#81 now on main; RERUN-6 is next.
+2026-05-26 — close-session after RERUN-6 and BF-1..4 (PR #83). RERUN-6 ran to completion
+(5×5 attempts, two Docker restarts required); diagnosed and fixed a three-layer BLAST silent
+failure; BF-1..4 merged (blast in Dockerfile, pre-check, preflight, SKILL.md rewrite, L-26).
+348/349 tests passing. Walkthrough 13 written. All PRs #1–#83 now on main.
 
 ## Current status
-All planned RERUN-5 infrastructure remediations and post-mortem improvements are
-implemented. Harness is fully functional with Anthropic, Groq, and Cerebras providers.
-Ready for a RERUN-6 benchmark run to validate all improvements end-to-end.
+RERUN-6 complete (benchmark run validated SI/SK/SL/TM/GD/CA remediations). BLAST silent
+failure root-caused and fixed (BF-1..4, PR #83). Docker image needs rebuild before next
+eval run to pick up the new `blast` package. Next eval run (RERUN-6 redux) expected to show
+hb002 improvement from 0/5 to 3–5/5 with working BLAST.
 
 ## Active feature slice
-RERUN-6 — Qwen3/Cerebras benchmark run (next up; see Pending slices for full spec).
+None — all planned slices complete. Suggested next: rebuild Docker + re-run RERUN-6 to
+confirm hb002 improvement; or begin curated tool wrappers (DESeq2/STAR/featureCounts).
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
@@ -82,59 +85,21 @@ RERUN-6 — Qwen3/Cerebras benchmark run (next up; see Pending slices for full s
 - Close-session docs reconciliation (PR #81)
   features.md drift fixes; L-25 in code-learnings; walkthrough 12.rerun5_remediations.md;
   README --rebuild flag + References
+- RERUN-6: Qwen3/Cerebras benchmark run (5×5 attempts, Cerebras two-round critic)
+  hb002 0/5 (BLAST binary missing), hb022 3/5 (SC-1 fix vindicated), hb053 0/5
+  Diagnosed three-layer BLAST failure; BF-1..4 implemented and merged (PR #83)
+- BF-1..4: BLAST+ install + silent failure remediation (PR #83, 2026-05-26)
+  blast in Dockerfile; pre-check binary before dispatch; set -o pipefail on pipe; preflight
+  in run_eval.py; blast-search SKILL.md rewrite (PATH → use-tool guidance); L-26 added
+- Close-session docs reconciliation (PR #84)
+  features.md: RERUN-6 + BF sections added, GD-5 note; claude-progress.txt updated;
+  walkthrough 13.rerun6_blast_fixes.md written; README References updated
 
 ## Pending slices
 
-### RERUN-6: Qwen3/Cerebras benchmark run (validate all RERUN-5 remediations)
-
-**Goal:** Run 5 preview problems × 5 attempts with Qwen3 on Cerebras, two-round critic
-also on Qwen3/Cerebras. Compare results against RERUN-5 baseline using compare_runs.py.
-
-**Pre-flight checklist (do before launching):**
-1. Run `git pull origin main` to confirm on latest main.
-2. Confirm CEREBRAS_API_KEY is set: `set -a && source .env && set +a`
-3. Dry-run to check API key and cost estimate:
-   `python scripts/run_eval.py --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key "$CEREBRAS_API_KEY" --model qwen-3-235b-a22b-instruct-2507 --dataset preview --n-attempts 5 --max-steps 100 --dry-run`
-4. Docker image rebuild: SI hash-gating will trigger automatically on first real run
-   (all 5 skill files changed since last build). Explicit rebuild if preferred:
-   `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .`
-
-**Run command:**
-```bash
-python scripts/run_eval.py \
-  --provider openai \
-  --api-base-url https://api.cerebras.ai/v1 \
-  --api-key "$CEREBRAS_API_KEY" \
-  --model qwen-3-235b-a22b-instruct-2507 \
-  --critic-model qwen-3-235b-a22b-instruct-2507 \
-  --critic-injection-points after_final_answer \
-  --critic-injection-points after_critic_response \
-  --max-critic-rounds 2 \
-  --dataset preview \
-  --n-attempts 5 \
-  --max-steps 100
-```
-
-**Analysis steps after the run completes:**
-1. Check `results/scores.json` for pass@1 and pass@5 per problem.
-2. Run `python scripts/trajectory_to_md.py results/trajectories/` to generate Markdown summaries.
-3. If a prior RERUN-5 results dir exists, run:
-   `python scripts/compare_runs.py results/ <rerun5-results-dir>/`
-4. For critic hallucination rate, check trajectories for critic responses that cite
-   "Step N says: ..." (CITATION GATE enforcement) vs. uncited concerns.
-5. Focus on hb002 (BLAST PATH issue), recq (genome download), and critic grounding.
-
-**Expected improvements over RERUN-5:**
-- hb002: blast-search SKILL (PATH warning) should stop agent bypassing blast_search tool
-- recq: genome-retrieval SKILL + TM fixes should prevent premature download abandonment
-- Critic: CA CITATION GATE should reduce hallucinated concern rate
-
-**Definition of done:** run completes without harness errors; results/scores.json populated
-for all 5 problems × 5 attempts; trajectory Markdown files generated.
-
----
-
 - Curated bioinformatics tool wrappers (DESeq2, STAR, featureCounts) — not yet started
+- RERUN-6 redux: re-run with rebuilt Docker image (blast now in Dockerfile via BF-1) to
+  validate hb002 improvement. Run command same as RERUN-6; add `--results-dir results/rerun6-redux`.
 
 ## Documentation
 Walkthroughs in documents/code_walkthroughs/:
@@ -145,10 +110,11 @@ Walkthroughs in documents/code_walkthroughs/:
 - 8.Agent_B_walkthrough.md — empty BLAST disambiguation + critic prompt alternatives (BE/CP)
 - 9.Agent_A_walkthrough.md — general method advice + in-container reference SKILLs (GM)
 - 12.rerun5_remediations.md — RERUN-5 harness remediations (SI/SK/SL/TM/GD/CA)
+- 13.rerun6_blast_fixes.md — RERUN-6 run + three-layer BLAST failure diagnosis and BF-1..4 fix
 
 ## Next steps (in priority order)
-1. RERUN-6: run benchmark with Qwen3/Cerebras — full spec in Pending slices above.
-   Docker rebuild will trigger automatically via SI hash-gating on first eval run.
+1. Rebuild Docker image + RERUN-6 redux: `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .`
+   then re-run RERUN-6 to confirm hb002 improvement with working BLAST (expected 3–5/5 from 0/5).
 2. CI guard: AST-based test that asserts every `self.X` read in `AgentRun._loop` has a matching
    `self.X = …` initialiser in `AgentRun.__init__` (see L-21).
 3. Curated tool wrappers: DESeq2, STAR, featureCounts SKILL files + Docker integration.
@@ -162,22 +128,18 @@ Walkthroughs in documents/code_walkthroughs/:
 - Full 99-problem dataset requires HuggingFace approval
 - Groq Dev Tier upgrades temporarily unavailable (since ~Apr 2026, no ETA)
 - Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md
-- Docker image rebuild needed before RERUN-6: CA + GD added 5 skill files since last build.
-  SI hash-gating will detect and trigger rebuild automatically on first eval run.
+- Docker image rebuild needed before next eval: BF-1 added `blast` to micromamba install.
+  Run: `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .` from repo root.
+  SI hash-gating will also detect the stale image automatically on first eval run.
 
 ## Test status
-341/342 passing on claude/ca-critic-accuracy-v2 branch (1 pre-existing failure in
+348/349 passing on main (1 pre-existing failure in
 test_analyze_trajectories::TestFindDataCache::test_returns_none_when_missing).
 
-New tests this session:
-- 8 tests: TestComputeBuildHash, TestEnsureDockerImage (SI)
-- 3 tests: TestEnvironmentContextSkillsInjection, TestSystemPromptSkillsDiscovery (SK)
-- 4 tests: TestStepLimitPrompt, TestStepLimitExtraction (SL)
-- 4 tests: TestTimeStepMessaging (TM)
-- 14 tests: TestSkillFileGenomeRetrieval, TestSkillFileUcscFetch, TestSkillFileBlastSearch,
-  TestSystemPromptGenomeAndBlastPointers (GD)
-- 13 tests: TestCriticCitationGate, TestCriticFollowupCitationGate, TestCriticTruncationLimits,
-  TestLoadCriticSkill (CA, test_agent_helpers.py) + test_critic_grounding.py (CA-5)
+New tests added this session (BF-1..4, PR #83):
+- 2 tests: TestBlastInDockerfile (BF-1: Dockerfile has blast, BASH_TOOL mentions blast)
+- 3 tests: TestBlastMissingBinaryPreCheck (BF-2: pre-check returns error not "No hits", no blast cmd run, pipefail prefix)
+- 2 tests: TestPreflightContainerTools (BF-3: exits on missing binary, passes on present)
 
 ## Notes for next agent session
 - Provider flags: --provider anthropic|openai|ollama|groq, --api-base-url, --api-key, --judge-model
@@ -186,14 +148,11 @@ New tests this session:
   Available models: qwen-3-235b-a22b-instruct-2507, llama3.1-8b, gpt-oss-120b
 - Two-round critic: --critic-injection-points after_final_answer --critic-injection-points after_critic_response
   --max-critic-rounds 2
-- Docker image rebuild required after CA merge (SI hash-gating detects stale image automatically)
+- Docker image rebuild required (BF-1 added blast to micromamba install; SI hash-gating detects automatically)
   Command: docker build -t bio-mystery-bench:latest -f docker/Dockerfile . (from repo root)
 - /workspace/skills/ now has 5 files: deg-functional-enrichment.md, chipseq-tf-identification.md,
   genome-retrieval.md, ucsc-sequence-fetch.md, blast-search.md
 - SKILLS/critic-guidance/SKILL.md is host-side only (not in Docker image)
-- Suggested next run: RERUN-6 with Qwen3/Cerebras to validate all RERUN-5 remediations
-  (SI+SK+SL+TM+GD+CA all merged). Expected improvements over RERUN-5 baseline:
-  * hb002: blast-search SKILL should prevent agent bypassing blast_search tool
-  * recq: genome-retrieval + TM fixes should prevent premature download abandonment
-  * Critic: CA fixes should reduce hallucination rate in critic responses
-- All fixes in PRs #1–#81 merged to main
+- RERUN-6 results in results/rerun6/ — hb002 was 0/5 due to BLAST binary missing (now fixed by BF-1)
+  Redux run expected to show hb002 improvement; compare with results/rerun6/ as baseline
+- All fixes in PRs #1–#83 merged to main
