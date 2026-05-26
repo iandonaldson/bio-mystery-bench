@@ -868,6 +868,204 @@ class TestBlastVersionAndSummary:
 
 
 # ---------------------------------------------------------------------------
+# BF-2: blast_search dispatch — missing binary pre-check + pipefail
+# ---------------------------------------------------------------------------
+
+class TestBlastMissingBinaryPreCheck:
+    """BF-2: when blastn is absent the dispatch must surface a clear error
+    immediately, not a misleading 'no hits' summary."""
+
+    def _make_blast_tool_call(self, call_id="tu_bf2", program="blastn"):
+        from harness.llm import LLMToolCall
+        return LLMToolCall(
+            id=call_id,
+            name="blast_search",
+            input={
+                "query": "/workspace/scratch/q.fasta",
+                "database": "nt",
+                "program": program,
+                "max_hits": 5,
+            },
+        )
+
+    def _make_run_with_scripted_responses(self, responses, exec_side_effect):
+        from harness.llm import LLMResponse, LLMUsage
+        from harness.config import RunConfig
+
+        client = MagicMock()
+        client.chat.side_effect = [
+            LLMResponse(
+                stop_reason=r["stop_reason"],
+                text=r.get("text", ""),
+                tool_calls=r.get("tool_calls", []),
+                usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+                raw_content=r.get("raw_content", []),
+            )
+            for r in responses
+        ]
+        container = MagicMock()
+        container.exec_command.side_effect = exec_side_effect
+        config = RunConfig(max_steps=10, step_timeout_seconds=30, run_timeout_seconds=60)
+        run = AgentRun(
+            client=client,
+            container=container,
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+        return run, container
+
+    def test_missing_binary_returns_error_not_no_hits(self):
+        """When blastn -version returns rc=127, dispatch must return error with install hint."""
+        def exec_side_effect(command, timeout=300):
+            if "-version" in command:
+                return ("", "command not found", 127)
+            return ("snapshot", "", 0)
+
+        tc = self._make_blast_tool_call()
+        responses = [
+            {"stop_reason": "tool_use", "tool_calls": [tc],
+             "raw_content": [{"type": "tool_use", "id": "tu_bf2", "name": "blast_search",
+                              "input": tc.input}]},
+            {"stop_reason": "end_turn", "text": "FINAL ANSWER: done", "raw_content": []},
+        ]
+        run, _ = self._make_run_with_scripted_responses(responses, exec_side_effect)
+        run.run()
+
+        # The tool_result passed back to the LLM must mention the missing binary
+        tool_result_text = ""
+        for msg in run.messages:
+            if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+                for block in msg["content"]:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        tool_result_text += str(block.get("content", ""))
+
+        assert "not found" in tool_result_text.lower() or "binary" in tool_result_text.lower()
+        assert "No hits at default parameters" not in tool_result_text
+
+    def test_missing_binary_does_not_run_blast_command(self):
+        """When the pre-check fails, no blast command should be exec'd."""
+        blast_cmds_run = []
+
+        def exec_side_effect(command, timeout=300):
+            if "-version" in command:
+                return ("", "command not found", 127)
+            if "-db" in command:
+                blast_cmds_run.append(command)
+            return ("snapshot", "", 0)
+
+        tc = self._make_blast_tool_call()
+        responses = [
+            {"stop_reason": "tool_use", "tool_calls": [tc],
+             "raw_content": [{"type": "tool_use", "id": "tu_bf2", "name": "blast_search",
+                              "input": tc.input}]},
+            {"stop_reason": "end_turn", "text": "FINAL ANSWER: done", "raw_content": []},
+        ]
+        run, _ = self._make_run_with_scripted_responses(responses, exec_side_effect)
+        run.run()
+        assert blast_cmds_run == [], "No blast command should be dispatched when binary is missing"
+
+    def test_blast_command_uses_pipefail(self):
+        """When binary is present the dispatched command must use set -o pipefail."""
+        dispatched_commands = []
+
+        def exec_side_effect(command, timeout=300):
+            if "-version" in command:
+                return ("blastn: 2.14.0+\n", "", 0)
+            if "-db" in command:
+                dispatched_commands.append(command)
+                return ("", "", 0)
+            return ("snapshot", "", 0)
+
+        tc = self._make_blast_tool_call()
+        responses = [
+            {"stop_reason": "tool_use", "tool_calls": [tc],
+             "raw_content": [{"type": "tool_use", "id": "tu_bf2p", "name": "blast_search",
+                              "input": tc.input}]},
+            {"stop_reason": "end_turn", "text": "FINAL ANSWER: done", "raw_content": []},
+        ]
+        run, _ = self._make_run_with_scripted_responses(responses, exec_side_effect)
+        run.run()
+        assert len(dispatched_commands) == 1
+        assert "pipefail" in dispatched_commands[0]
+
+
+# ---------------------------------------------------------------------------
+# BF-1: Dockerfile and BASH_TOOL mention blast
+# ---------------------------------------------------------------------------
+
+class TestBlastInDockerfile:
+    """BF-1: blast binary must be listed in the Dockerfile micromamba install
+    and in the BASH_TOOL description so agents know it is available."""
+
+    def test_dockerfile_installs_blast(self):
+        dockerfile = (
+            __import__("pathlib").Path(__file__).parent.parent / "docker" / "Dockerfile"
+        ).read_text()
+        # blast package on a standalone line in the micromamba RUN block
+        assert "blast" in dockerfile, "docker/Dockerfile must install 'blast' via micromamba"
+
+    def test_bash_tool_description_mentions_blast(self):
+        from harness.agent import BASH_TOOL
+        desc = BASH_TOOL["description"]
+        assert "blast" in desc.lower(), "BASH_TOOL description must mention blast as pre-installed"
+
+
+# ---------------------------------------------------------------------------
+# BF-3: _preflight_container_tools
+# ---------------------------------------------------------------------------
+
+class TestPreflightContainerTools:
+    """BF-3: pre-flight check must exit when required binaries are absent."""
+
+    @pytest.fixture(autouse=True)
+    def _add_scripts_to_path(self):
+        import sys
+        from pathlib import Path
+        scripts_dir = str(Path(__file__).parent.parent / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        yield
+
+    def _import_preflight(self):
+        import importlib, sys
+        # Ensure scripts/ is importable
+        spec = importlib.util.spec_from_file_location(
+            "run_eval",
+            str(__import__("pathlib").Path(__file__).parent.parent / "scripts" / "run_eval.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_preflight_exits_when_blastn_missing(self):
+        from unittest.mock import patch, MagicMock as MM
+        mod = self._import_preflight()
+        import docker as docker_sdk
+
+        fake_client = MM()
+        fake_client.containers.run.return_value = b"bash: blastn: command not found\nrc=127"
+
+        with pytest.raises(SystemExit):
+            with patch.object(docker_sdk, "from_env", return_value=fake_client):
+                mod._preflight_container_tools("bio-mystery-bench:latest")
+
+    def test_preflight_passes_when_blastn_present(self):
+        from unittest.mock import patch, MagicMock as MM
+        mod = self._import_preflight()
+        import docker as docker_sdk
+
+        fake_client = MM()
+        fake_client.containers.run.return_value = b"blastn: 2.14.0+\nrc=0"
+
+        # Should not raise
+        with patch.object(docker_sdk, "from_env", return_value=fake_client):
+            mod._preflight_container_tools("bio-mystery-bench:latest")
+
+
+# ---------------------------------------------------------------------------
 # BLAST_TOOL definition  (B-2)
 # ---------------------------------------------------------------------------
 
@@ -1628,10 +1826,12 @@ class TestSkillFileBlastSearch:
         assert "name" in fm
         assert "description" in fm
 
-    def test_has_bash_path_warning(self):
+    def test_has_use_tool_guidance(self):
+        # BF-1: blast is now installed; skill must still direct agents to
+        # use the blast_search tool (not raw bash) to avoid context flooding.
         text = self._text()
-        assert "not in" in text.lower() or "NOT in" in text
-        assert "PATH" in text
+        assert "blast_search" in text
+        assert "tool" in text.lower()
 
     def test_mentions_blast_search_tool(self):
         assert "blast_search" in self._text()

@@ -689,3 +689,47 @@ grep -n "== CRITIC_SYSTEM_PROMPT\|== CRITIC_FOLLOWUP_PROMPT\|== system_prompt" t
 **Cross-references:** L-19 (new behavioral constraints on end_turn break existing mock fixtures)
 — both stem from the same root cause: adding code to a path that existing tests assumed was
 simpler than it now is.
+
+---
+
+## L-26: Bash pipeline exit codes are silently swallowed — always use pipefail or pre-check
+
+**Lesson:** In bash, `cmd1 | cmd2` returns the exit code of `cmd2`, not `cmd1`. When
+the harness runs `blastn ... | tee file` via `container.exec_command()` and `blastn`
+is missing (rc=127), `tee` still exits 0 — so the harness sees `rc=0`, treats empty
+stdout as "no hits", and never surfaces the "command not found" error.
+
+**The incident (RERUN-6, 2026-05-26):** BLAST+ was never added to the Dockerfile.
+Every `blast_search` harness tool call returned "No hits at default parameters" on all
+five hb002 attempts. Agents wasted 20–40 steps retrying BLAST variants before falling
+back to unreliable manual 16S motif matching. Result: hb002 0/5 even though the genome
+matches Bacillus licheniformis at 100% identity (confirmed via `Bio.Blast.NCBIWWW`).
+
+**Rules:**
+1. **Never pipe harness-dispatched commands without `set -o pipefail`** (or equivalent).
+   Prepend `set -o pipefail; ` to any command string passed to `exec_command()` that
+   uses a pipe, so upstream failures propagate.
+2. **Pre-check binary availability before running** — call `tool -version` first; if
+   it fails, return a clear error immediately rather than running and misinterpreting
+   empty output.
+3. **Any new tool added to the harness that wraps a binary must also add that binary
+   to the Dockerfile** — don't assume it's present. Add a smoke test assertion for
+   `binary -version` returning rc=0.
+4. **CI guard:** add a `_preflight_container_tools()` check to `scripts/run_eval.py`
+   that starts a throwaway container and verifies each required binary before
+   committing to an eval run (BF-3).
+
+**Pattern (from harness/agent.py blast_search dispatch after BF-2):**
+```python
+# Pre-check before running — surfaces missing binary immediately
+version = _get_blast_version(container, program)
+if not version:
+    return f"BLAST binary '{program}' not found — install with: micromamba install -c bioconda blast"
+
+# Use pipefail so the pipe propagates non-zero exit from the binary
+command = f"set -o pipefail; {program} -db {database} ... | tee {out_file}"
+```
+
+**Codebase sweep (2026-05-26):** no other harness tool uses piped `exec_command()` calls —
+the `blast_search` dispatch was the only instance. All bash tool calls surface exit codes
+via `_format_result()`. Still, apply rule 1 proactively to any future tool that pipes.

@@ -98,6 +98,40 @@ def _ping_model(client: "Provider", model: str, label: str) -> None:
         sys.exit(1)
 
 
+def _preflight_container_tools(image_name: str) -> None:
+    """BF-3: start a throwaway container and verify critical tools are present.
+
+    Aborts the eval with a clear message if a required binary is missing so
+    the failure is visible before any API spend. Currently checks: blastn.
+    """
+    _REQUIRED_TOOLS = [
+        ("blastn", "-version", "blast", "micromamba install -c bioconda blast"),
+    ]
+    console.print("[dim]Checking container tool availability...[/dim]")
+    try:
+        import docker as docker_sdk
+        client = docker_sdk.from_env()
+        for binary, flag, pkg_name, install_cmd in _REQUIRED_TOOLS:
+            result = client.containers.run(
+                image_name,
+                command=f"bash -c '{binary} {flag} 2>&1; echo rc=$?'",
+                remove=True,
+                stdout=True,
+                stderr=True,
+            )
+            output = result.decode() if isinstance(result, bytes) else str(result)
+            if "rc=0" not in output:
+                console.print(
+                    f"[red]Container preflight FAILED: '{binary}' not found in image '{image_name}'.\n"
+                    f"  Fix: {install_cmd}  (then rebuild with --rebuild)[/red]"
+                )
+                sys.exit(1)
+    except Exception as e:
+        console.print(f"[yellow]Container preflight skipped (could not run check container): {e}[/yellow]")
+        return
+    console.print("[dim]Container tools OK.[/dim]")
+
+
 def load_system_prompt() -> str:
     prompt_path = Path(__file__).parent.parent / "prompts" / "system.txt"
     if prompt_path.exists():
@@ -467,6 +501,9 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
     docker_dir = Path(__file__).parent.parent / "docker"
     if not no_build:
         ensure_docker_image(config.image_name, docker_dir, force_rebuild=rebuild)
+
+    # BF-3: verify critical container tools are present before committing to a run
+    _preflight_container_tools(config.image_name)
 
     results_path = Path(results_dir)
     results_path.mkdir(parents=True, exist_ok=True)

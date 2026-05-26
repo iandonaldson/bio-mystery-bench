@@ -17,7 +17,8 @@ BASH_TOOL = {
     "description": (
         "Execute a bash command in the bioinformatics sandbox container. "
         "You have internet access to NCBI, Ensembl, UniProt, and other biological databases. "
-        "Pre-installed tools: samtools, bcftools, bedtools, biopython, scanpy, anndata, "
+        "Pre-installed tools: samtools, bcftools, bedtools, blast (blastn/blastp/blastx), "
+        "biopython, scanpy, anndata, "
         "pandas, numpy, scipy, scikit-learn, pysam, salmon, kallisto, STAR, bowtie2, hisat2, "
         "R (with DESeq2, edgeR, limma, ggplot2, dplyr), pip, conda/micromamba. "
         "Working directory: /workspace. Problem data: /workspace/data/ (read-only). "
@@ -440,8 +441,40 @@ class AgentRun:
                         remote   = "-remote" if database in ("nt", "nr") else ""
                         out_file = "/workspace/scratch/blast_results.txt"
 
+                        # BF-2: pre-check binary before running so a missing binary is
+                        # never silently reported as "no hits" (the | tee pipe would
+                        # otherwise return rc=0 even when the program is absent).
+                        if program not in self._blast_versions:
+                            self._blast_versions[program] = _get_blast_version(
+                                self.container, program
+                            )
+                        version = self._blast_versions[program]
+
+                        if not version:
+                            missing_msg = (
+                                f"BLAST binary '{program}' not found in the container. "
+                                f"Install with: micromamba install -c bioconda blast"
+                            )
+                            self.logger.log("tool_call", {"blast_command": f"{program} -version (pre-check failed)"})
+                            self.logger.log("tool_result", {
+                                "blast_command": missing_msg,
+                                "summary": missing_msg,
+                                "returncode": 127,
+                            })
+                            result_text = (
+                                f"BLAST error: {missing_msg}\n\n"
+                                + _progress_footer(self.steps, self.config.max_steps, self.input_tokens)
+                            )
+                            tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": tool_call.id,
+                                "content": result_text,
+                            })
+                            continue
+
+                        # Use pipefail so a missing binary propagates rc≠0 through the pipe.
                         command = (
-                            f"{program} -db {database} -query {query} "
+                            f"set -o pipefail; {program} -db {database} -query {query} "
                             f"-outfmt 6 -max_target_seqs {max(max_hits * 2, 50)} "
                             f"{remote} {extra} | tee {out_file}"
                         ).strip()
@@ -457,15 +490,11 @@ class AgentRun:
                         except Exception as e:
                             stdout, stderr, rc = "", str(e), -1
 
-                        if program not in self._blast_versions:
-                            self._blast_versions[program] = _get_blast_version(
-                                self.container, program
-                            )
                         summary = _summarize_blast_output(
                             stdout,
                             max_hits,
                             program=program,
-                            version=self._blast_versions[program],
+                            version=version,
                         )
                         result_text = (
                             f"BLAST Summary ({program} vs {database}):\n{summary}\n\n"
