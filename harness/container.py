@@ -1,4 +1,6 @@
+import io
 import shutil
+import tarfile
 import uuid
 import threading
 from pathlib import Path
@@ -34,15 +36,14 @@ class Container:
         self._container: Optional[DockerContainer] = None
 
     def start(self) -> None:
-        volumes = {}
-        if self.data_dir and Path(self.data_dir).exists():
-            volumes[str(self.data_dir)] = {"bind": "/workspace/data", "mode": "ro"}
-
-        # Keep scratch inside the project tree so no writes escape the project directory
-        # Docker requires an absolute path for bind mounts
+        # /workspace/scratch is bind-mounted for agent writes.
+        # Data files are NOT bind-mounted — they are copied in via put_archive
+        # after the container starts, to avoid macOS VirtioFS EDEADLK (errno 35)
+        # which manifests as `total 0` block count: file metadata is visible but
+        # all reads fail with "Resource deadlock avoided".
         scratch_dir = Path(".scratch").resolve() / self.name
         scratch_dir.mkdir(parents=True, exist_ok=True)
-        volumes[str(scratch_dir)] = {"bind": "/workspace/scratch", "mode": "rw"}
+        volumes = {str(scratch_dir): {"bind": "/workspace/scratch", "mode": "rw"}}
         self._scratch_dir = scratch_dir
 
         self._container = self._client.containers.run(
@@ -55,6 +56,23 @@ class Container:
             network_mode="bridge",
             volumes=volumes,
         )
+
+        if self.data_dir and Path(self.data_dir).exists():
+            self._copy_data_to_container()
+
+    def _copy_data_to_container(self) -> None:
+        """Stream data files into the container's overlay FS via put_archive.
+
+        Overlay FS is immune to the macOS VirtioFS EDEADLK bug that breaks
+        read-only bind mounts on long-running Docker Desktop sessions.
+        """
+        data_path = Path(self.data_dir)
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for item in sorted(data_path.iterdir()):
+                tar.add(str(item), arcname=item.name)
+        buf.seek(0)
+        self._container.put_archive("/workspace/data", buf)
 
     def exec_command(self, command: str, timeout: int = 300) -> tuple[str, str, int]:
         """Run a bash command in the container, returning (stdout, stderr, returncode)."""
