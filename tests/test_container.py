@@ -143,6 +143,72 @@ class TestScratchDirLocation:
 
         c.stop()
 
+    def test_data_dir_not_in_volumes(self, mock_docker, tmp_path, monkeypatch):
+        """Data dir must NOT appear as a bind mount — it is copied in via put_archive."""
+        monkeypatch.chdir(tmp_path)
+        mock_client, mock_container = mock_docker
+
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "sample.csv").write_text("a,b\n1,2\n")
+
+        c = Container(image="test", data_dir=data_dir)
+        c.start()
+
+        call_kwargs = mock_client.containers.run.call_args[1]
+        volumes = call_kwargs.get("volumes", {})
+        assert str(data_dir) not in volumes, "data_dir must not be bind-mounted"
+
+        c.stop()
+
+
+class TestCopyDataToContainer:
+    def test_put_archive_called_with_data_files(self, mock_docker, tmp_path, monkeypatch):
+        """put_archive must be called when data_dir is provided."""
+        monkeypatch.chdir(tmp_path)
+        mock_client, mock_container = mock_docker
+
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "genome.fasta").write_text(">seq\nACGT\n")
+        (data_dir / "metadata.csv").write_text("id,val\n1,x\n")
+
+        c = Container(image="test", data_dir=data_dir)
+        c.start()
+
+        mock_container.put_archive.assert_called_once()
+        dest_path, _ = mock_container.put_archive.call_args[0]
+        assert dest_path == "/workspace/data"
+
+    def test_put_archive_not_called_when_no_data_dir(self, mock_docker, tmp_path, monkeypatch):
+        """put_archive must not be called when data_dir is None."""
+        monkeypatch.chdir(tmp_path)
+        mock_client, mock_container = mock_docker
+
+        c = Container(image="test", data_dir=None)
+        c.start()
+
+        mock_container.put_archive.assert_not_called()
+
+    def test_tar_contains_data_files(self, mock_docker, tmp_path, monkeypatch):
+        """The tar archive sent to put_archive must contain the data files."""
+        import io, tarfile
+        monkeypatch.chdir(tmp_path)
+        mock_client, mock_container = mock_docker
+
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "reads.fastq").write_text("@r1\nACGT\n+\nIIII\n")
+
+        c = Container(image="test", data_dir=data_dir)
+        c.start()
+
+        _, tar_stream = mock_container.put_archive.call_args[0]
+        tar_bytes = tar_stream.read()
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tf:
+            names = tf.getnames()
+        assert "reads.fastq" in names
+
 
 class TestContainerContextManager:
     def test_enter_returns_container(self, mock_docker, tmp_path, monkeypatch):
