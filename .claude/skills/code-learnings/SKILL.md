@@ -733,3 +733,58 @@ command = f"set -o pipefail; {program} -db {database} ... | tee {out_file}"
 **Codebase sweep (2026-05-26):** no other harness tool uses piped `exec_command()` calls —
 the `blast_search` dispatch was the only instance. All bash tool calls surface exit codes
 via `_format_result()`. Still, apply rule 1 proactively to any future tool that pipes.
+
+---
+
+## L-27: macOS VirtioFS EDEADLK — copy data into overlay FS, do not bind-mount
+
+**Lesson (2026-05-28 — IO-1, PR #85):** Docker Desktop on macOS uses **VirtioFS** for
+bind mounts. On long-running sessions VirtioFS can enter a broken state where file
+metadata is visible (file sizes appear correctly in `ls -l`, `du` shows non-zero size)
+but every read syscall returns errno 35 "Resource deadlock avoided" (EDEADLK). The harness
+saw this as agents failing immediately with "Resource deadlock avoided" on every read of
+the problem's data files.
+
+**Fingerprint:** `ls -lh /workspace/data` inside a broken VirtioFS container prints
+`total 0` as the block count even though file sizes are non-zero. This is the earliest
+reliable indicator — check it before assuming the data itself is corrupt.
+
+**Root cause:** VirtioFS is the macOS Docker Desktop filesystem virtualization layer.
+It proxies filesystem calls between the container and the host. Under load or after many
+hours of uptime it can enter a deadlock state affecting specific mount points.
+
+**Why `/workspace/scratch` was immune:** The scratch directory was created fresh for each
+container run (new UUID path each time). VirtioFS's deadlock was mount-point-specific;
+a fresh bind mount started in a healthy state. But `/workspace/data` was always
+mounted from the same host path (the problem's extracted data directory), so it stayed
+broken across restarts.
+
+**Fix (IO-1, `harness/container.py`):** Remove the read-only bind mount for `data_dir`
+entirely. After `container.start()` launches the container, call `_copy_data_to_container()`:
+build a tar archive in memory from `data_dir` and call
+`self._container.put_archive("/workspace/data", buf)`. The Docker daemon writes the archive
+directly into the container's **overlay FS** — which lives inside the Docker VM's virtual
+disk and is never accessed through VirtioFS. From the container's perspective `/workspace/data`
+is a normal directory with no host involvement.
+
+**Rule:**
+- **Never bind-mount data files that are read-only from the container's perspective.**
+  Use `put_archive` into the container's overlay FS instead.
+- **The scratch mount (read-write, per-run)** is still a bind mount — it must be accessible
+  from the host for artifact collection. The VirtioFS bug has not affected scratch mounts
+  because they are fresh per run.
+- **Diagnosis:** when a container run fails instantly with "Resource deadlock avoided",
+  check `ls -lh` block count inside the container. `total 0` = VirtioFS deadlock, not
+  data corruption.
+
+**Detection:**
+```bash
+# Inside a failing container — VirtioFS deadlock fingerprint:
+ls -lh /workspace/data  # shows: total 0  (but file sizes are non-zero)
+
+# Healthy container (overlay FS via put_archive):
+ls -lh /workspace/data  # shows: total 8.0K  (or similar — non-zero blocks)
+```
+
+**Cross-reference:** §L-26 (bash pipeline exit codes silently swallowed) — both stem from
+the same pattern: silent failure that produces misleading "success" signals.

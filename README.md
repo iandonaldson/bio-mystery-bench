@@ -523,3 +523,4 @@ To replicate Anthropic's published numbers you need the full 99-problem dataset 
 - [Code walkthrough: general method advice + in-container reference SKILLs (GM)](documents/code_walkthroughs/9.Agent_A_walkthrough.md)
 - [Code walkthrough: RERUN-5 harness remediations (SI/SK/SL/TM/GD/CA)](documents/code_walkthroughs/12.rerun5_remediations.md)
 - [Code walkthrough: RERUN-6 benchmark run + BLAST silent failure fix (BF-1..4)](documents/code_walkthroughs/13.rerun6_blast_fixes.md)
+- [Code walkthrough: macOS VirtioFS EDEADLK fix — data files via overlay FS (IO-1)](documents/code_walkthroughs/14.io1_virtiofs_fix.md)
