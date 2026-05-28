@@ -334,12 +334,14 @@ class AgentRun:
             self.cache_read_tokens += step_cache
             self.cost_tracker.add(step_input, step_output, step_cache)
 
-            self.logger.log("assistant", {
+            log_entry: dict = {
                 "stop_reason": response.stop_reason,
-                "reasoning": response.text,
                 "content": response.raw_content,
                 "usage": {"input": step_input, "output": step_output, "cache_read": step_cache},
-            })
+            }
+            if response.reasoning:
+                log_entry["reasoning"] = response.reasoning
+            self.logger.log("assistant", log_entry)
 
             self.messages.append({"role": "assistant", "content": response.raw_content})
             self.steps += 1
@@ -641,9 +643,8 @@ class AgentRun:
                         sl_resp.usage.output_tokens,
                         sl_resp.usage.cache_read_tokens,
                     )
-                    self.logger.log("assistant", {
+                    sl_log_entry: dict = {
                         "stop_reason": sl_resp.stop_reason,
-                        "reasoning": sl_resp.text,
                         "content": sl_resp.raw_content,
                         "usage": {
                             "input": sl_resp.usage.input_tokens,
@@ -651,7 +652,10 @@ class AgentRun:
                             "cache_read": sl_resp.usage.cache_read_tokens,
                         },
                         "step_limit_response": True,
-                    })
+                    }
+                    if sl_resp.reasoning:
+                        sl_log_entry["reasoning"] = sl_resp.reasoning
+                    self.logger.log("assistant", sl_log_entry)
                     self.messages.append({"role": "assistant", "content": sl_resp.raw_content})
                     self.steps += 1
 

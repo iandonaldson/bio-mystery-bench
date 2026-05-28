@@ -32,3 +32,5 @@ class RunConfig:
     critic_injection_points: list = field(default_factory=list)
     critic_model: str = ""  # empty = use same model as agent
     max_critic_rounds: int = 2
+    # RV-1: reasoning depth for OpenAI-compatible providers (e.g. "high", "medium", "low", "" = omit)
+    reasoning_effort: str = "high"

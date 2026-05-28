@@ -44,6 +44,7 @@ class LLMResponse:
     tool_calls: list[LLMToolCall] = field(default_factory=list)
     usage: LLMUsage = field(default_factory=LLMUsage)
     raw_content: Any = None                      # Anthropic-format list stored back in messages
+    reasoning: str = ""                          # CoT from msg.reasoning (OpenAI) or thinking blocks (Anthropic)
 
 
 # ---------------------------------------------------------------------------
@@ -88,10 +89,15 @@ def _anthropic_response_to_llm_response(response: Any) -> LLMResponse:
     content = response.content
     text_parts = []
     tool_calls = []
+    thinking_parts = []
     for block in content:
         btype = block.type if hasattr(block, "type") else block.get("type")
         if btype == "text":
             text_parts.append(block.text if hasattr(block, "text") else block.get("text", ""))
+        elif btype == "thinking":
+            thinking_parts.append(
+                block.thinking if hasattr(block, "thinking") else block.get("thinking", "")
+            )
         elif btype == "tool_use":
             tool_calls.append(LLMToolCall(
                 id=block.id if hasattr(block, "id") else block["id"],
@@ -110,6 +116,7 @@ def _anthropic_response_to_llm_response(response: Any) -> LLMResponse:
             cache_read_tokens=cache_read,
         ),
         raw_content=content,
+        reasoning="\n".join(thinking_parts),
     )
 
 
@@ -118,12 +125,17 @@ def _anthropic_response_to_llm_response(response: Any) -> LLMResponse:
 # ---------------------------------------------------------------------------
 
 class OpenAIProvider(Provider):
-    def __init__(self, api_key: str, base_url: Optional[str] = None) -> None:
+    def __init__(self, api_key: str, base_url: Optional[str] = None, reasoning_effort: str = "") -> None:
         import openai
         self._client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        self._reasoning_effort = reasoning_effort
 
     def chat(self, model, system, messages, tools, max_tokens, logger=None) -> LLMResponse:
         import openai as _openai
+        effort = getattr(self, "_reasoning_effort", "")
+        # RV-4: append Harmony reasoning directive when reasoning_effort is set
+        if effort and system:
+            system = system + f"\n\nReasoning: {effort}"
         oai_messages = anthropic_to_openai_messages(messages, system)
         oai_tools = [anthropic_tool_to_openai(t) for t in tools] if tools else None
         kwargs: dict[str, Any] = dict(
@@ -133,6 +145,9 @@ class OpenAIProvider(Provider):
         )
         if oai_tools:
             kwargs["tools"] = oai_tools
+        # RV-1: pass reasoning_effort to Cerebras/OpenAI-compatible providers when set
+        if effort:
+            kwargs["reasoning_effort"] = effort
 
         for attempt in range(len(_RATE_LIMIT_BACKOFF_DELAYS) + 1):
             try:
@@ -313,6 +328,10 @@ def openai_response_to_llm_response(response: Any) -> LLMResponse:
     if hasattr(usage, "prompt_tokens_details") and usage.prompt_tokens_details:
         cache_read = getattr(usage.prompt_tokens_details, "cached_tokens", 0) or 0
 
+    # RV-2: read reasoning from Cerebras text_parsed format (msg.reasoning field)
+    raw_reasoning = getattr(msg, "reasoning", None) or getattr(msg, "reasoning_content", None) or ""
+    reasoning = raw_reasoning if isinstance(raw_reasoning, str) else ""
+
     return LLMResponse(
         stop_reason=stop_reason,
         text=text,
@@ -323,6 +342,7 @@ def openai_response_to_llm_response(response: Any) -> LLMResponse:
             cache_read_tokens=cache_read,
         ),
         raw_content=raw_content,
+        reasoning=reasoning,
     )
 
 
@@ -374,12 +394,13 @@ def build_provider(
     api_key: str,
     base_url: Optional[str] = None,
     judge_model: str = "",
+    reasoning_effort: str = "",
 ) -> Provider:
     """Instantiate the correct Provider subclass and set judge_model."""
     p: Provider
     if provider == "anthropic":
         p = AnthropicProvider(api_key=api_key)
     else:
-        p = OpenAIProvider(api_key=api_key, base_url=base_url)
+        p = OpenAIProvider(api_key=api_key, base_url=base_url, reasoning_effort=reasoning_effort)
     p.judge_model = judge_model
     return p

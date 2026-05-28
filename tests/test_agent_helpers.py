@@ -2358,3 +2358,130 @@ class TestBlastQuerySizeCap:
         run.run()
         calls = [str(c) for c in container.exec_command.call_args_list]
         assert any("blastn -db" in c for c in calls)
+
+
+# ---------------------------------------------------------------------------
+# RV-2: LLMResponse.reasoning field populated from msg.reasoning
+# ---------------------------------------------------------------------------
+
+class TestOpenAIResponseReasoning:
+    """RV-2: openai_response_to_llm_response reads msg.reasoning into LLMResponse.reasoning."""
+
+    def _make_oai_response(self, content=None, reasoning=None, finish_reason="stop"):
+        msg = MagicMock()
+        msg.content = content
+        msg.tool_calls = []
+        if reasoning is not None:
+            msg.reasoning = reasoning
+        else:
+            del msg.reasoning  # ensure getattr returns None
+        choice = MagicMock()
+        choice.finish_reason = finish_reason
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        usage = MagicMock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 5
+        usage.prompt_tokens_details = None
+        resp.usage = usage
+        return resp
+
+    def test_reasoning_field_populated_from_msg_reasoning(self):
+        resp = self._make_oai_response(content="answer", reasoning="I reasoned step by step")
+        result = openai_response_to_llm_response(resp)
+        assert result.reasoning == "I reasoned step by step"
+
+    def test_reasoning_field_empty_when_msg_has_no_reasoning(self):
+        resp = self._make_oai_response(content="answer")
+        result = openai_response_to_llm_response(resp)
+        assert result.reasoning == ""
+
+    def test_reasoning_field_defaults_to_empty_on_llm_response(self):
+        from harness.llm import LLMUsage
+        r = LLMResponse(stop_reason="end_turn", text="hi", usage=LLMUsage())
+        assert r.reasoning == ""
+
+    def test_reasoning_does_not_affect_text_field(self):
+        resp = self._make_oai_response(content="final answer", reasoning="CoT goes here")
+        result = openai_response_to_llm_response(resp)
+        assert result.text == "final answer"
+        assert result.reasoning == "CoT goes here"
+
+
+# ---------------------------------------------------------------------------
+# RV-3: trajectory_to_md rendering fixes
+# ---------------------------------------------------------------------------
+
+class TestTrajectoryToMd:
+    """RV-3: trajectory_to_md renders reasoning <details>, blast_command, and summary correctly."""
+
+    def _convert(self, events: list[dict]) -> str:
+        import json
+        import tempfile
+        from pathlib import Path
+        from scripts.trajectory_to_md import convert
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".jsonl", delete=False, prefix="problem-hb000_attempt-0"
+        ) as f:
+            for ev in events:
+                f.write(json.dumps(ev) + "\n")
+            tmp = Path(f.name)
+        try:
+            return convert(tmp)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    def test_reasoning_field_rendered_as_details_block(self):
+        events = [
+            {"role": "assistant", "step": 1, "elapsed_seconds": 5.0,
+             "data": {"reasoning": "I need to check the genome size first.", "content": []}},
+        ]
+        md = self._convert(events)
+        assert "<details>" in md
+        assert "Reasoning" in md
+        assert "I need to check the genome size first." in md
+
+    def test_narration_text_rendered_without_details(self):
+        events = [
+            {"role": "assistant", "step": 1, "elapsed_seconds": 3.0,
+             "data": {"content": [{"type": "text", "text": "Let me explore the data."}]}},
+        ]
+        md = self._convert(events)
+        assert "Let me explore the data." in md
+        assert "<details>" not in md
+
+    def test_blast_command_renders_as_blast_label(self):
+        events = [
+            {"role": "tool_call", "step": 2, "elapsed_seconds": 1.0,
+             "data": {"blast_command": "blastn -db nt -remote -query /tmp/q.fa"}},
+        ]
+        md = self._convert(events)
+        assert "BLAST" in md
+        assert "blastn -db nt -remote" in md
+
+    def test_bash_command_renders_as_command_label(self):
+        events = [
+            {"role": "tool_call", "step": 2, "elapsed_seconds": 1.0,
+             "data": {"command": "ls /workspace/data/"}},
+        ]
+        md = self._convert(events)
+        assert "Command" in md
+        assert "ls /workspace/data/" in md
+
+    def test_blast_result_renders_summary_field(self):
+        events = [
+            {"role": "tool_result", "step": 3, "elapsed_seconds": 180.0,
+             "data": {"blast_command": "blastn ...", "summary": "Top hit: E.coli 98%", "returncode": 0}},
+        ]
+        md = self._convert(events)
+        assert "Top hit: E.coli 98%" in md
+
+    def test_bash_result_renders_stdout_field(self):
+        events = [
+            {"role": "tool_result", "step": 3, "elapsed_seconds": 2.0,
+             "data": {"command": "ls", "stdout": "genome.fasta\nreads.fastq", "returncode": 0}},
+        ]
+        md = self._convert(events)
+        assert "genome.fasta" in md

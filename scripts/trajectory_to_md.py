@@ -73,21 +73,29 @@ def _render_run(events: list[dict], run_index: int, total_runs: int) -> list[str
                 for b in content_blocks
                 if isinstance(b, dict) and b.get("type") == "text"
             ]
-            reasoning = "\n\n".join(t for t in texts if t.strip())
-            if reasoning:
-                lines.append(f"### Step {step} — Agent reasoning [{elapsed:.0f}s]\n")
-                lines.append(f"{reasoning}\n")
+            narration = "\n\n".join(t for t in texts if t.strip())
+            reasoning = data.get("reasoning", "")
+            if reasoning or narration:
+                lines.append(f"### Step {step} — Agent [{elapsed:.0f}s]\n")
+                if reasoning:
+                    lines.append("<details><summary>Reasoning</summary>\n")
+                    lines.append(reasoning.rstrip())
+                    lines.append("</details>\n")
+                if narration:
+                    lines.append(f"{narration}\n")
 
         elif role == "tool_call":
-            cmd = data.get("command", "")
-            lines.append(f"### Step {step} — Command [{elapsed:.0f}s]\n")
+            is_blast = "blast_command" in data
+            cmd = data.get("blast_command") if is_blast else data.get("command", "")
+            label = "BLAST" if is_blast else "Command"
+            lines.append(f"### Step {step} — {label} [{elapsed:.0f}s]\n")
             lines.append("```bash")
-            lines.append(cmd.rstrip())
+            lines.append((cmd or "").rstrip())
             lines.append("```\n")
 
         elif role == "tool_result":
             rc = data.get("returncode", "?")
-            stdout = (data.get("stdout") or "").rstrip()
+            stdout = (data.get("stdout") or data.get("summary") or "").rstrip()
             stderr = (data.get("stderr") or "").rstrip()
             lines.append(f"### Step {step} — Result (rc={rc}) [{elapsed:.0f}s]\n")
             if stdout:
