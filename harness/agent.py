@@ -118,6 +118,29 @@ BLAST_TOOL = {
     },
 }
 
+# BP-2: custom outfmt 6 spec that appends sscinames so the agent reads species
+# names directly from NCBI rather than relying on memory.  Column indices for
+# existing fields are unchanged (sseqid=1, pident=2, evalue=10, bitscore=11);
+# sscinames lands at index 12.
+_BLAST_OUTFMT = (
+    "6 qseqid sseqid pident length mismatch gapopen "
+    "qstart qend sstart send evalue bitscore sscinames"
+)
+
+# BP-1: mapping from official BLAST+ exit codes to agent-readable diagnostics.
+# rc=0 with empty output is handled separately as "genuine no hits".
+_BLAST_RC_MESSAGES: dict[int, str] = {
+    -1:  "Timed out — query too large or network stall. Use ≤1500 bp for remote BLAST.",
+    1:   "Invalid query or options — check FASTA format and flags.",
+    2:   "Database error — NCBI nt/nr may be temporarily unavailable.",
+    3:   "BLAST engine error — retry with shorter query.",
+    4:   "Out of memory — use shorter query.",
+    5:   "Network error connecting to NCBI — transient failure, retry. Not 'no hits'.",
+    6:   "Output file error — check write permissions.",
+    127: "Binary not found — install with: micromamba install -c bioconda blast",
+    255: "Rate-limited or unknown NCBI error — back off and retry. Not 'no hits'.",
+}
+
 CRITIC_SYSTEM_PROMPT = """\
 You are a scientific reasoning auditor reviewing an AI agent's solution to a
 computational biology problem. Your job is to identify assumptions the agent
@@ -236,6 +259,7 @@ class AgentRun:
         self.cache_read_tokens = 0
         self._critic_rounds: int = 0
         self._blast_versions: dict[str, str] = {}
+        self._last_blast_time: float = 0.0
         self._final_answer_reprompted: bool = False
         self._step_limit_prompted: bool = False
 
@@ -472,10 +496,18 @@ class AgentRun:
                             })
                             continue
 
+                        # BP-3: enforce ≤3 remote BLAST calls/s per NCBI guidelines.
+                        if remote:
+                            _min_interval = 1.0 / 3.0
+                            _elapsed = time.monotonic() - self._last_blast_time
+                            if _elapsed < _min_interval:
+                                time.sleep(_min_interval - _elapsed)
+
                         # Use pipefail so a missing binary propagates rc≠0 through the pipe.
                         command = (
                             f"set -o pipefail; {program} -db {database} -query {query} "
-                            f"-outfmt 6 -max_target_seqs {max(max_hits * 2, 50)} "
+                            f'-outfmt "{_BLAST_OUTFMT}" '
+                            f"-max_target_seqs {max(max_hits * 2, 50)} "
                             f"{remote} {extra} | tee {out_file}"
                         ).strip()
 
@@ -490,11 +522,15 @@ class AgentRun:
                         except Exception as e:
                             stdout, stderr, rc = "", str(e), -1
 
+                        if remote:
+                            self._last_blast_time = time.monotonic()
+
                         summary = _summarize_blast_output(
                             stdout,
                             max_hits,
                             program=program,
                             version=version,
+                            rc=rc,
                         )
                         result_text = (
                             f"BLAST Summary ({program} vs {database}):\n{summary}\n\n"
@@ -857,32 +893,54 @@ def _summarize_blast_output(
     max_hits: int = 10,
     program: str = "blastn",
     version: str = "",
+    rc: int = 0,
 ) -> str:
-    """Parse BLAST tabular output (outfmt 6) into a compact summary table.
+    """Parse BLAST tabular output into a compact summary table.
 
-    When there are no hits, the summary explicitly confirms the program is
-    installed (citing `version` if provided) so the agent does not mistake an
-    empty result for a missing binary (see L-12).
+    BP-1: When rc≠0 and stdout is empty, returns the rc-specific diagnostic from
+    _BLAST_RC_MESSAGES so the agent can distinguish timeout/network/rate-limit from
+    genuine no-hits.  When rc≠0 but there are partial hits, prepends a WARNING.
+    BP-2: Extracts sscinames (column 12) from the _BLAST_OUTFMT spec so species
+    names appear directly in the summary instead of only accession IDs.
     """
     lines = [l for l in stdout.strip().splitlines() if l and not l.startswith("#")]
+
     if not lines:
+        if rc != 0:
+            msg = _BLAST_RC_MESSAGES.get(
+                rc, f"BLAST failed (rc={rc}) — see stderr. Do not interpret as 'no hits'."
+            )
+            return f"rc={rc}: {msg}"
+        # rc=0, genuinely no hits
         installed_clause = f" {program} installed (version {version})." if version else ""
         return (
             f"No hits at default parameters.{installed_clause} "
-            "Anonymised sequences may not match nt/nr. "
             "Consider: (a) -evalue 1, (b) shorter query, "
             "(c) -task blastn-short for very short queries, "
             "(d) different program (blastn↔blastx)."
         )
-    header = f"{'Hit ID':<45} {'Identity':>8} {'E-value':>12} {'Bitscore':>9}"
-    sep = "-" * 76
+
+    header = f"{'Hit ID':<45} {'Species':<32} {'Identity':>8} {'E-value':>12} {'Bitscore':>9}"
+    sep = "-" * 109
     rows = [header, sep]
+    if rc != 0:
+        msg = _BLAST_RC_MESSAGES.get(
+            rc, f"BLAST failed (rc={rc}) — see stderr. Do not interpret as 'no hits'."
+        )
+        rows.insert(0, f"WARNING rc={rc}: {msg}")
+        rows.insert(1, "Partial results:")
     for line in lines[:max_hits]:
         parts = line.split("\t")
         if len(parts) < 12:
             continue
-        sseqid, pident, evalue, bitscore = parts[1], parts[2], parts[10], parts[11]
-        rows.append(f"{sseqid[:45]:<45} {pident:>7}% {evalue:>12} {bitscore.strip():>9}")
+        sseqid  = parts[1]
+        pident  = parts[2]
+        evalue  = parts[10]
+        bitscore = parts[11]
+        sscinames = parts[12].strip() if len(parts) > 12 else "N/A"
+        rows.append(
+            f"{sseqid[:45]:<45} {sscinames[:32]:<32} {pident:>7}% {evalue:>12} {bitscore.strip():>9}"
+        )
     return "\n".join(rows)
 
 

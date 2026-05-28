@@ -788,3 +788,34 @@ ls -lh /workspace/data  # shows: total 8.0K  (or similar — non-zero blocks)
 
 **Cross-reference:** §L-26 (bash pipeline exit codes silently swallowed) — both stem from
 the same pattern: silent failure that produces misleading "success" signals.
+
+---
+
+## L-28: SKILL files must not include problem-specific prompts
+
+**Rule:** New or updated SKILL files must not include problem-specific prompts.
+Prohibited content: specific gene names, pathway names, organism names, or
+methodological guidance that applies to a particular benchmark question rather
+than as a general approach to that biological question type.
+
+**Why:** Problem-specific SKILL content artificially inflates performance on
+seen questions (the agent essentially has the answer pre-loaded) but does not
+generalise to unseen questions of the same type. This makes benchmark results
+misleading.
+
+**Examples of what NOT to include:**
+- "Use 16S rRNA BLAST to identify Bacillus species" (problem-specific organism + gene)
+- "Look for TP53 mutations in the DEG list" (problem-specific gene)
+- "The heat-stress response involves HSP70 genes" (problem-specific answer)
+
+**Examples of what IS acceptable:**
+- "Use `blastn` with `extra_args='-evalue 1'` to relax the hit threshold" (general parameter advice)
+- "For enrichment analysis, use ORA/GSEA against MSigDB hallmarks or GO" (general method)
+- "hg38/mm10 are the standard assemblies for human/mouse ChIP-seq data" (general methodology)
+
+**How to apply:** When writing or updating a SKILL file, ask: "Does this recipe
+work for *any* question of this biological type, or only for the specific
+question I just solved?" If the latter, generalise or omit it.
+
+**Cross-reference:** §L-12 (empty BLAST results vs missing binary) — the 16S
+BLAST recipe removed from blast-search SKILL.md in BP-4 was the motivating case.

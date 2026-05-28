@@ -1,7 +1,12 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-28 — close-session after IO-1 VirtioFS fix (PR #85). Diagnosed macOS Docker Desktop
+2026-05-28 — BLAST Plans Improvement (BP-1..5) planned and slices added to features.md and
+claude-progress.txt. 18 new unit tests added (167/167 passing in test_agent_helpers.py).
+Code changes implemented (rc-specific messages, sscinames outfmt, rate limiting) and SKILL.md
+updated. Awaiting PR and session-close.
+
+Previous: 2026-05-28 — close-session after IO-1 VirtioFS fix (PR #85). Diagnosed macOS Docker Desktop
 VirtioFS EDEADLK bug causing all hb022/hb053 attempts to fail with "Resource deadlock avoided";
 fixed by replacing data_dir bind mount with put_archive into container overlay FS. 4 new tests.
 352/353 tests passing. Walkthrough 14 written. RERUN-6 redux running (hb022 4/5, hb053 2/5
@@ -14,14 +19,14 @@ silent failure; BF-1..4 merged (blast in Dockerfile, pre-check, preflight, SKILL
 L-26). 348/349 tests passing. Walkthrough 13 written.
 
 ## Current status
-RERUN-6 redux in progress (5 problems × 5 attempts, Cerebras/Qwen3 originally, gpt-oss-120b
-for hb053 tail after Cerebras model dropout). hb002 improved from 0/5 (RERUN-6) to 2/5 (redux)
-— BLAST now works; remaining 3 failures due to timeout on large sequences and taxid hallucination
-(taxdb not installed). hb022 confirmed 4/5. VirtioFS EDEADLK fixed (IO-1, PR #85).
+BLAST Plans Improvement (BP-1..5) implemented this session. 18 new tests; 167/167 passing in
+test_agent_helpers.py. Changes: rc-specific BLAST diagnostics (_BLAST_RC_MESSAGES), sscinames
+in outfmt (_BLAST_OUTFMT), remote BLAST rate limiting (≤3/s), blast-search SKILL.md rewrite
+(removed 16S recipe, added query-size/rc/rate-limit guidance), L-28 added to code-learnings.
+RERUN-6 redux was in progress (hb022 4/5, hb002 2/5, hb053 2/5); awaiting final results.
 
 ## Active feature slice
-None — all planned slices complete. Suggested next: rebuild Docker + re-run RERUN-6 to
-confirm hb002 improvement; or begin curated tool wrappers (DESeq2/STAR/featureCounts).
+BP-1..5 BLAST Plans Improvement — code complete, tests passing, awaiting PR.
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
@@ -108,16 +113,16 @@ confirm hb002 improvement; or begin curated tool wrappers (DESeq2/STAR/featureCo
 
 ## Pending slices
 
+- BLAST Plans Improvement (BP-1 to BP-5) — implemented 2026-05-28, awaiting PR:
+  BP-1: rc-specific BLAST diagnostic messages (_BLAST_RC_MESSAGES in harness/agent.py)
+  BP-2: sscinames in outfmt (_BLAST_OUTFMT constant; species column in hit table)
+  BP-3: Remote BLAST rate limiting (≤3/s; self._last_blast_time in AgentRun)
+  BP-4: blast-search SKILL.md rewrite (query size, rc table, NCBI ref, 16S recipe removed)
+  BP-5: L-28 in code-learnings (no problem-specific SKILL content rule)
+- taxdb in Dockerfile: prevents taxid hallucination in hb002-style problems (deferred)
 - Curated bioinformatics tool wrappers (DESeq2, STAR, featureCounts) — not yet started
-- RERUN-6 redux: IN PROGRESS — hb053 attempts 2-4 still running (gpt-oss-120b on Cerebras).
+- RERUN-6 redux: hb053 attempts 2-4 pending (gpt-oss-120b on Cerebras).
   hb022 4/5 confirmed; hb002 2/5 confirmed. Results in results/rerun6-redux/.
-- BLAST improvements (identified but not yet implemented; user said "Not yet"):
-  - Pass `rc` into `_summarize_blast_output` with rc-specific error messages
-    (rc=-1 → "timed out/query too large"; rc=5 → "network error"; rc=255 → "rate-limited")
-  - Install taxdb in Dockerfile to fix taxid→species-name lookup (prevents hallucination
-    when agent recalls taxid from memory)
-  - Update blast-search SKILL.md with query size guidance (≤5000 bp for remote BLAST;
-    use first 1500 bp of 16S rRNA gene rather than full genome)
 
 ## Documentation
 Walkthroughs in documents/code_walkthroughs/:
@@ -130,6 +135,7 @@ Walkthroughs in documents/code_walkthroughs/:
 - 12.rerun5_remediations.md — RERUN-5 harness remediations (SI/SK/SL/TM/GD/CA)
 - 13.rerun6_blast_fixes.md — RERUN-6 run + three-layer BLAST failure diagnosis and BF-1..4 fix
 - 14.io1_virtiofs_fix.md — macOS VirtioFS EDEADLK fix (IO-1, PR #85)
+- 15.blast_plans_improvement.md — BLAST rc diagnostics, sscinames, rate limiting (BP-1..5)
 
 ## Next steps (in priority order)
 1. RERUN-6 redux: await hb053 completion (attempts 2-4 running with gpt-oss-120b);
@@ -147,21 +153,24 @@ Walkthroughs in documents/code_walkthroughs/:
 ## Blockers / open questions for human
 - hb053 (heat stress) — attempts 2-4 re-running with gpt-oss-120b (Cerebras dropped qwen model mid-run).
   Attempts 0 and 1 both correct ("heat stress"). human_solvable=False.
-- BLAST rc-specific errors and taxdb: user deferred ("Not yet") — confirm before implementing.
+- BP-1..5 PR: needs review + merge before next run.
+- taxdb in Dockerfile: not yet implemented — prevents taxid hallucination in hb002-style problems.
 - Full 99-problem dataset requires HuggingFace approval
 - Groq Dev Tier upgrades temporarily unavailable (since ~Apr 2026, no ETA)
 - Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md
 
 ## Test status
-352/353 passing on main (1 pre-existing failure in
-test_analyze_trajectories::TestFindDataCache::test_returns_none_when_missing — environment-dependent:
-_find_data_cache walks up from the tmp_path and finds the real .data-cache at the repo root).
+167/167 passing in tests/test_agent_helpers.py (BP-1..5 changes, this session).
+352/353 passing overall on main (1 pre-existing failure in
+test_analyze_trajectories::TestFindDataCache::test_returns_none_when_missing).
 
-New tests added this session (IO-1, PR #85):
-- 1 test: TestScratchDirLocation::test_data_dir_not_in_volumes (data_dir absent from volumes dict)
-- 3 tests: TestCopyDataToContainer (put_archive called, not called when no data_dir, tar contains files)
+New tests added this session (BP-1..5):
+- 9 tests: TestSummarizeBlastOutputRcDispatch (rc=-1,1,5,127,255,unknown,rc=0,partial-hits,table)
+- 5 tests: TestSummarizeBlastOutputSscinames (sscinames extraction, truncation, 12-col compat, outfmt const, header)
+- 4 tests: TestBlastRateLimiting (init, update after remote call, no sleep for local, sleep enforced)
 
 ## Notes for next agent session
+- BP-1..5 changes are on branch close-io1-virtiofs (or create new branch); open PR before running
 - Provider flags: --provider anthropic|openai|ollama|groq, --api-base-url, --api-key, --judge-model
 - Groq: reads GROQ_API_KEY, auto base URL https://api.groq.com/openai/v1
 - Cerebras: use --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key $CEREBRAS_API_KEY
@@ -170,7 +179,8 @@ New tests added this session (IO-1, PR #85):
 - Two-round critic: --critic-injection-points after_final_answer --critic-injection-points after_critic_response
   --max-critic-rounds 2
 - Docker image: IO-1 (PR #85) removed data_dir bind mount; data now injected via put_archive.
-  No Dockerfile change in IO-1 — image from BF-1 (PR #83) is still current.
+  No Dockerfile change in BP-1..5 — image from BF-1 (PR #83) is still current.
+- blast-search SKILL.md rebuilt (BP-4): 16S recipe removed; query-size, rc table, rate-limit added
 - /workspace/skills/ now has 5 files: deg-functional-enrichment.md, chipseq-tf-identification.md,
   genome-retrieval.md, ucsc-sequence-fetch.md, blast-search.md
 - SKILLS/critic-guidance/SKILL.md is host-side only (not in Docker image)

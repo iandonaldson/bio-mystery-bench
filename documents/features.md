@@ -849,3 +849,56 @@ Sub-slices:
 
 **New tests:** 4 (1 `TestScratchDirLocation::test_data_dir_not_in_volumes` + 3 `TestCopyDataToContainer`).
 Test count after merge: 352/353 (1 pre-existing failure in `TestFindDataCache::test_returns_none_when_missing`).
+
+---
+
+## ⬜ BLAST Plans Improvement (BP-1 to BP-5)
+
+Motivated by RERUN-6-redux observations: (1) `_summarize_blast_output` emitted "No hits"
+for timeout/network/rate-limit errors, causing the agent to try irrelevant alternatives
+instead of retrying; (2) agents hallucinated species names from training memory because
+only accession IDs appeared in the hit table.
+
+### ⬜ BP-1: rc-specific BLAST diagnostic messages
+
+| ID | Scope | Test |
+|----|-------|------|
+| BP-1-1 | Add `rc: int = 0` to `_summarize_blast_output` signature. Add module-level `_BLAST_RC_MESSAGES: dict[int, str]` mapping all official BLAST+ exit codes to precise diagnostics. | `TestSummarizeBlastOutputRcDispatch::test_all_rc_codes_covered_in_table` |
+| BP-1-2 | When rc≠0 and stdout empty: return rc-specific message. When rc≠0 with partial hits: prepend WARNING line to hit table. rc=0+empty: keep "No hits — consider alternatives". | `test_rc_negative_one_timeout`, `test_rc_5_network_error`, `test_rc_255_rate_limited`, `test_rc_127_binary_not_found`, `test_rc_zero_empty_still_says_no_hits`, `test_nonzero_rc_with_partial_hits_shows_warning_and_rows` |
+| BP-1-3 | Pass `rc` into `_summarize_blast_output` at call site in `_loop`. | Covered by integration tests in `TestBlastMissingBinaryPreCheck` |
+
+### ⬜ BP-2: sscinames in outfmt
+
+| ID | Scope | Test |
+|----|-------|------|
+| BP-2-1 | Add module-level `_BLAST_OUTFMT` constant with custom outfmt 6 spec including sscinames. Replace hardcoded `-outfmt 6` with `-outfmt "{_BLAST_OUTFMT}"`. | `TestSummarizeBlastOutputSscinames::test_blast_outfmt_constant_contains_sscinames` |
+| BP-2-2 | Extract sscinames from parts[12]; add Species column to header and row format; guard `len(parts) > 12` for backward compat. | `test_sscinames_extracted_from_13_col_row`, `test_sscinames_na_for_12_col_row`, `test_header_includes_species_column` |
+
+### ⬜ BP-3: Remote BLAST rate limiting
+
+| ID | Scope | Test |
+|----|-------|------|
+| BP-3-1 | Add `self._last_blast_time: float = 0.0` to `AgentRun.__init__`. | `TestBlastRateLimiting::test_last_blast_time_initialised_to_zero` |
+| BP-3-2 | Before each remote BLAST call, sleep if < 1/3 s since last call. Update `_last_blast_time` after each call. | `test_last_blast_time_updated_after_remote_call`, `test_no_sleep_for_local_blast`, `test_sleep_enforced_when_calls_too_close` |
+
+### ⬜ BP-4: Update blast-search SKILL.md
+
+| ID | Scope |
+|----|-------|
+| BP-4-1 | Add query size guidance: ≤5000 bp for remote; use ≤1500 bp sub-region for long sequences; rc=-1 = timeout, not no hits. |
+| BP-4-2 | Add exit code reference table: rc≠0 always means tool/network failure; never "not in database". |
+| BP-4-3 | Add NCBI BLAST+ manual URL (https://www.ncbi.nlm.nih.gov/books/NBK279684/) and topic index. |
+| BP-4-4 | Add rate limit note: tool enforces ≤3 remote calls/s automatically. |
+| BP-4-5 | Remove Recipe 1 (16S rRNA species ID — problem-specific). Replace with generic nucleotide sequence search recipe. |
+
+### ⬜ BP-5: Code-learnings directive + SKILL audit
+
+| ID | Scope |
+|----|-------|
+| BP-5-1 | Add L-28 to `.claude/skills/code-learnings/SKILL.md`: SKILLs must not include problem-specific prompts (gene names, organism names, or method guidance tied to a specific question). |
+| BP-5-2 | Audit all five SKILL files for problem-specific content; none required changes. |
+
+**Files:** `harness/agent.py`, `SKILLS/blast-search/SKILL.md`, `.claude/skills/code-learnings/SKILL.md`, `tests/test_agent_helpers.py`
+
+**New tests:** 18 (`TestSummarizeBlastOutputRcDispatch` × 9, `TestSummarizeBlastOutputSscinames` × 5, `TestBlastRateLimiting` × 4).
+Test count after merge: 167/167 passing in `tests/test_agent_helpers.py`.
