@@ -13,6 +13,8 @@ from harness.agent import (
     _handle_abort,
     _has_final_answer_marker,
     _summarize_blast_output,
+    _BLAST_RC_MESSAGES,
+    _BLAST_OUTFMT,
     ResourceEstimate,
     AgentResult,
     BASH_TOOL,
@@ -640,10 +642,17 @@ class TestOpenAIProviderRateLimitBackoff:
 # _summarize_blast_output  (B-1)
 # ---------------------------------------------------------------------------
 
-def _blast_row(sseqid="NM_001234.1", pident="98.50", evalue="1e-120", bitscore="450"):
-    """Build a minimal valid BLAST outfmt-6 row (12 tab-separated fields)."""
+def _blast_row(
+    sseqid="NM_001234.1",
+    pident="98.50",
+    evalue="1e-120",
+    bitscore="450",
+    sscinames="Homo sapiens",
+):
+    """Build a minimal valid BLAST outfmt row matching _BLAST_OUTFMT (13 tab-separated fields)."""
     return "\t".join([
-        "query1", sseqid, pident, "200", "3", "0", "1", "200", "10", "209", evalue, bitscore
+        "query1", sseqid, pident, "200", "3", "0", "1", "200", "10", "209",
+        evalue, bitscore, sscinames,
     ])
 
 
@@ -2002,3 +2011,201 @@ class TestLoadCriticSkill:
         skill_body = run._load_critic_skill()
         if skill_body:
             assert skill_body.strip()[:50] in captured["system"]
+
+
+# ---------------------------------------------------------------------------
+# BP-1: rc-specific BLAST diagnostic messages
+# ---------------------------------------------------------------------------
+
+class TestSummarizeBlastOutputRcDispatch:
+    """BP-1: _summarize_blast_output must map each BLAST+ exit code to a distinct
+    diagnostic and must never emit 'no hits' for a non-zero rc."""
+
+    def test_rc_negative_one_timeout(self):
+        result = _summarize_blast_output("", rc=-1)
+        assert "rc=-1" in result
+        assert "Timed out" in result or "timed out" in result.lower()
+        assert "No hits" not in result
+
+    def test_rc_1_invalid_query(self):
+        result = _summarize_blast_output("", rc=1)
+        assert "rc=1" in result
+        assert "Invalid" in result or "invalid" in result.lower()
+        assert "No hits" not in result
+
+    def test_rc_5_network_error(self):
+        result = _summarize_blast_output("", rc=5)
+        assert "rc=5" in result
+        assert "Network error" in result or "network" in result.lower()
+        assert "Not 'no hits'" in result
+        assert "No hits" not in result
+
+    def test_rc_127_binary_not_found(self):
+        result = _summarize_blast_output("", rc=127)
+        assert "rc=127" in result
+        assert "not found" in result.lower() or "Binary" in result
+        assert "No hits" not in result
+
+    def test_rc_255_rate_limited(self):
+        result = _summarize_blast_output("", rc=255)
+        assert "rc=255" in result
+        assert "Rate-limited" in result or "rate" in result.lower()
+        assert "Not 'no hits'" in result
+        assert "No hits" not in result
+
+    def test_unknown_rc_generic_message(self):
+        result = _summarize_blast_output("", rc=99)
+        assert "rc=99" in result
+        assert "no hits" not in result.lower() or "Do not interpret" in result
+
+    def test_rc_zero_empty_still_says_no_hits(self):
+        """rc=0 with empty output must keep the 'No hits — consider alternatives' message."""
+        result = _summarize_blast_output("", rc=0)
+        assert "No hits at default parameters" in result
+        assert "Consider:" in result
+
+    def test_nonzero_rc_with_partial_hits_shows_warning_and_rows(self):
+        """When rc≠0 but stdout has parseable rows, show WARNING prefix then hit rows."""
+        row = _blast_row("CP018249.1", pident="100.00", sscinames="Bacillus sp.")
+        result = _summarize_blast_output(row, rc=5)
+        lines = result.splitlines()
+        assert any("WARNING" in l for l in lines)
+        assert any("CP018249.1" in l for l in lines)
+
+    def test_all_rc_codes_covered_in_table(self):
+        """Every rc in _BLAST_RC_MESSAGES must produce a message containing 'rc=<N>'."""
+        for code, msg in _BLAST_RC_MESSAGES.items():
+            result = _summarize_blast_output("", rc=code)
+            assert f"rc={code}" in result, f"rc={code} not reflected in output"
+
+
+# ---------------------------------------------------------------------------
+# BP-2: sscinames in outfmt
+# ---------------------------------------------------------------------------
+
+class TestSummarizeBlastOutputSscinames:
+    """BP-2: species names (sscinames) must appear in the hit table."""
+
+    def test_sscinames_extracted_from_13_col_row(self):
+        row = _blast_row("CP018249.1", sscinames="Bacillus licheniformis")
+        result = _summarize_blast_output(row)
+        assert "Bacillus licheniformis" in result
+
+    def test_sscinames_truncated_at_32_chars(self):
+        long_name = "A" * 40
+        row = _blast_row("Hit1", sscinames=long_name)
+        result = _summarize_blast_output(row)
+        assert long_name not in result
+        assert "A" * 32 in result
+
+    def test_sscinames_na_for_12_col_row(self):
+        """12-column row (no sscinames) must still parse; species shown as N/A."""
+        row_12col = "\t".join([
+            "query1", "NM_001234.1", "98.50", "200", "3", "0",
+            "1", "200", "10", "209", "1e-120", "450",
+        ])
+        result = _summarize_blast_output(row_12col)
+        assert "N/A" in result
+        assert "NM_001234.1" in result
+
+    def test_blast_outfmt_constant_contains_sscinames(self):
+        assert "sscinames" in _BLAST_OUTFMT
+
+    def test_header_includes_species_column(self):
+        row = _blast_row()
+        result = _summarize_blast_output(row)
+        assert "Species" in result.splitlines()[0]
+
+
+# ---------------------------------------------------------------------------
+# BP-3: Remote BLAST rate limiting
+# ---------------------------------------------------------------------------
+
+class TestBlastRateLimiting:
+    """BP-3: the dispatch must enforce ≤3 remote calls/s (min 1/3 s between calls)."""
+
+    def _make_blast_run(self, database="nt"):
+        """Build a minimal AgentRun wired to execute exactly one blast_search call."""
+        from harness.llm import LLMResponse, LLMUsage, LLMToolCall
+        from harness.config import RunConfig
+
+        tc = LLMToolCall(
+            id="tu_bp3",
+            name="blast_search",
+            input={
+                "query": "/workspace/scratch/q.fasta",
+                "database": database,
+                "program": "blastn",
+                "max_hits": 5,
+            },
+        )
+        responses = [
+            LLMResponse(
+                stop_reason="tool_use",
+                text="",
+                tool_calls=[tc],
+                usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+                raw_content=[{"type": "tool_use", "id": "tu_bp3", "name": "blast_search",
+                              "input": tc.input}],
+            ),
+            LLMResponse(
+                stop_reason="end_turn",
+                text="FINAL ANSWER: done",
+                tool_calls=[],
+                usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+                raw_content=[],
+            ),
+        ]
+        client = MagicMock()
+        client.chat.side_effect = responses
+
+        # container: version check succeeds, blast command returns empty output
+        def exec_side_effect(command, timeout=300):
+            if "-version" in command:
+                return ("blastn: 2.16.0\n", "", 0)
+            return ("", "", 0)
+
+        container = MagicMock()
+        container.exec_command.side_effect = exec_side_effect
+        config = RunConfig(max_steps=10, step_timeout_seconds=30, run_timeout_seconds=60)
+        run = AgentRun(
+            client=client,
+            container=container,
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+        return run
+
+    def test_last_blast_time_initialised_to_zero(self):
+        run = self._make_blast_run()
+        assert run._last_blast_time == 0.0
+
+    def test_last_blast_time_updated_after_remote_call(self):
+        run = self._make_blast_run(database="nt")
+        before = time.monotonic()
+        run.run()
+        assert run._last_blast_time >= before
+
+    def test_no_sleep_for_local_blast(self):
+        """Local BLAST (non-nt/nr database) must not touch _last_blast_time or sleep."""
+        import unittest.mock as mock
+        run = self._make_blast_run(database="/local/db")
+        with mock.patch("time.sleep") as mock_sleep:
+            run.run()
+        mock_sleep.assert_not_called()
+        assert run._last_blast_time == 0.0
+
+    def test_sleep_enforced_when_calls_too_close(self):
+        """If _last_blast_time is set to 'now', the next remote call must sleep."""
+        import unittest.mock as mock
+        run = self._make_blast_run(database="nt")
+        # Simulate a very recent previous call (0.01 s ago)
+        run._last_blast_time = time.monotonic() - 0.01
+        with mock.patch("time.sleep") as mock_sleep:
+            run.run()
+        mock_sleep.assert_called_once()
+        sleep_duration = mock_sleep.call_args[0][0]
+        assert 0 < sleep_duration <= 1.0 / 3.0
