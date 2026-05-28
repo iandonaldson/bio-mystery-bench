@@ -852,14 +852,14 @@ Test count after merge: 352/353 (1 pre-existing failure in `TestFindDataCache::t
 
 ---
 
-## ⬜ BLAST Plans Improvement (BP-1 to BP-5)
+## ✅ BLAST Plans Improvement (BP-1 to BP-5)
 
 Motivated by RERUN-6-redux observations: (1) `_summarize_blast_output` emitted "No hits"
 for timeout/network/rate-limit errors, causing the agent to try irrelevant alternatives
 instead of retrying; (2) agents hallucinated species names from training memory because
 only accession IDs appeared in the hit table.
 
-### ⬜ BP-1: rc-specific BLAST diagnostic messages
+### ✅ BP-1: rc-specific BLAST diagnostic messages
 
 | ID | Scope | Test |
 |----|-------|------|
@@ -867,21 +867,21 @@ only accession IDs appeared in the hit table.
 | BP-1-2 | When rc≠0 and stdout empty: return rc-specific message. When rc≠0 with partial hits: prepend WARNING line to hit table. rc=0+empty: keep "No hits — consider alternatives". | `test_rc_negative_one_timeout`, `test_rc_5_network_error`, `test_rc_255_rate_limited`, `test_rc_127_binary_not_found`, `test_rc_zero_empty_still_says_no_hits`, `test_nonzero_rc_with_partial_hits_shows_warning_and_rows` |
 | BP-1-3 | Pass `rc` into `_summarize_blast_output` at call site in `_loop`. | Covered by integration tests in `TestBlastMissingBinaryPreCheck` |
 
-### ⬜ BP-2: sscinames in outfmt
+### ✅ BP-2: sscinames in outfmt
 
 | ID | Scope | Test |
 |----|-------|------|
 | BP-2-1 | Add module-level `_BLAST_OUTFMT` constant with custom outfmt 6 spec including sscinames. Replace hardcoded `-outfmt 6` with `-outfmt "{_BLAST_OUTFMT}"`. | `TestSummarizeBlastOutputSscinames::test_blast_outfmt_constant_contains_sscinames` |
 | BP-2-2 | Extract sscinames from parts[12]; add Species column to header and row format; guard `len(parts) > 12` for backward compat. | `test_sscinames_extracted_from_13_col_row`, `test_sscinames_na_for_12_col_row`, `test_header_includes_species_column` |
 
-### ⬜ BP-3: Remote BLAST rate limiting
+### ✅ BP-3: Remote BLAST rate limiting
 
 | ID | Scope | Test |
 |----|-------|------|
 | BP-3-1 | Add `self._last_blast_time: float = 0.0` to `AgentRun.__init__`. | `TestBlastRateLimiting::test_last_blast_time_initialised_to_zero` |
 | BP-3-2 | Before each remote BLAST call, sleep if < 1/3 s since last call. Update `_last_blast_time` after each call. | `test_last_blast_time_updated_after_remote_call`, `test_no_sleep_for_local_blast`, `test_sleep_enforced_when_calls_too_close` |
 
-### ⬜ BP-4: Update blast-search SKILL.md
+### ✅ BP-4: Update blast-search SKILL.md
 
 | ID | Scope |
 |----|-------|
@@ -891,7 +891,7 @@ only accession IDs appeared in the hit table.
 | BP-4-4 | Add rate limit note: tool enforces ≤3 remote calls/s automatically. |
 | BP-4-5 | Remove Recipe 1 (16S rRNA species ID — problem-specific). Replace with generic nucleotide sequence search recipe. |
 
-### ⬜ BP-5: Code-learnings directive + SKILL audit
+### ✅ BP-5: Code-learnings directive + SKILL audit
 
 | ID | Scope |
 |----|-------|
@@ -902,3 +902,65 @@ only accession IDs appeared in the hit table.
 
 **New tests:** 18 (`TestSummarizeBlastOutputRcDispatch` × 9, `TestSummarizeBlastOutputSscinames` × 5, `TestBlastRateLimiting` × 4).
 Test count after merge: 167/167 passing in `tests/test_agent_helpers.py`.
+
+---
+
+## ✅ BT-1..4: BLAST Timeout Remediation (PR #89, 2026-05-28)
+
+### Background
+
+Analysis of three hb002 validation trajectories (gpt-oss-120b on Cerebras) revealed two
+compounding failure modes. **Pattern 1 — Large-query-first:** All three attempts opened
+with a full-genome BLAST (4MB+) that immediately timed out (rc=-1, 600s per-command
+limit). Attempts 0 and 1 progressively downsized to 120 bp and 400 bp and succeeded;
+attempt 2 never found a working size and exhausted its time budget. **Pattern 2 — Hidden
+wall-clock limit:** The system prompt falsely stated "there is no wall-clock time limit
+on this run," so the agent had no incentive to stop retrying. The 3600s limit is a soft
+check polled at loop entry; in attempt 2 it fired only after step 100 was exhausted.
+
+| ID | Scope | Test |
+|----|-------|------|
+| BT-1 | Add `blast_max_query_bp: int = 1500` to `RunConfig`. In `_blast_search()` in `harness/agent.py`, before dispatching any remote BLAST, count query bp with `awk 'NF && !/^>/{n+=length($0)} END{print n+0}'`. If `bp > blast_max_query_bp` (and limit>0), return synthetic rc=-1 with message "Query too large (N bp)… Extract a ≤500 bp subsequence." | `TestBlastQuerySizeCap` × 4 (refused without blast call, logs error, within limit proceeds, zero disables) |
+| BT-2 | In `prompts/system.txt`, replace the false "there is no wall-clock time limit on this run" with the correct "this run has a 60-minute wall-clock time limit. Each remote BLAST call that times out consumes up to 10 minutes of that budget." | `test_system_prompt_states_wall_clock_limit` — assert `"60-minute wall-clock time limit"` present |
+| BT-3 | Add `elapsed_seconds` and `run_timeout_seconds` params to `_progress_footer()` in `harness/agent.py`. Footer now shows `elapsed Xs/3600s`. Fire urgency messages at ≥75% and ≥90% wall-clock consumption (independent of step-count threshold). Pass `time.monotonic() - start` and `config.run_timeout_seconds` at all call sites. | `TestProgressFooter` × 8 (basic, elapsed appears, step warning, step critical, wall-clock warning, wall-clock critical, no urgency below 75%, BLAST hint in warning) |
+| BT-4 | Rewrite opening of `SKILLS/blast-search/SKILL.md` with `⚠ CRITICAL: Always start with a short query (≤500 bp)`. Update size table (old: ≤5000 bp; new: ≤500 bp ideal, >1500 bp refused by harness). | Source inspection / blast-search SKILL.md content |
+
+**Files:** `harness/agent.py`, `harness/config.py`, `prompts/system.txt`, `SKILLS/blast-search/SKILL.md`, `tests/test_agent_helpers.py`
+
+**New tests:** 12 (`TestProgressFooter` × 8, `TestBlastQuerySizeCap` × 4).
+Test count after merge: 179/179 passing in `tests/test_agent_helpers.py`; 382/383 overall.
+
+---
+
+## ✅ RV-1..4: Reasoning Visibility for gpt-oss-120b (PR #89, 2026-05-28)
+
+### Background
+
+The hb002 validation run with gpt-oss-120b on Cerebras produced trajectories with no
+visible reasoning dialogue. The Cerebras Chat Completions API returns the model's
+chain-of-thought in `msg.reasoning` (default `text_parsed` format), but the harness
+only read `msg.content` (the `final` channel — always empty during tool-call steps for
+gpt-oss-120b) and discarded `msg.reasoning`. Additionally, no `reasoning_effort`
+parameter was sent, so Cerebras defaulted to `"medium"` reasoning depth. The
+`trajectory_to_md.py` converter also silently produced empty bash blocks for
+`blast_search` tool calls (wrong key: `command` vs `blast_command`) and empty results
+for BLAST tool results (wrong key: `stdout` vs `summary`).
+
+On Harmony format: the OpenAI Harmony article warns against using gpt-oss without the
+Harmony format. After research: Cerebras's Chat Completions endpoint handles Harmony
+tokenisation automatically (no developer action needed). The `system` role is accepted
+as an alias for the `developer` role by Cerebras. The `reasoning_effort` API parameter
+is the correct Chat-Completions-path mechanism; `Reasoning: high` in the system message
+is the native-format equivalent and is added as belt-and-suspenders (RV-4).
+
+| ID | Scope | Test |
+|----|-------|------|
+| RV-1 | Add `reasoning_effort: str = "high"` to `RunConfig` (default). Add `reasoning_effort: str = ""` param to `OpenAIProvider.__init__` (stored as `self._reasoning_effort`). In `OpenAIProvider.chat()`, conditionally pass `reasoning_effort=effort` to `client.chat.completions.create()`. Add `reasoning_effort` to `build_provider()`. Add `--reasoning-effort` CLI flag (choices: high/medium/low/"") to `scripts/run_eval.py`; pass to `RunConfig` and `build_provider`. | Unit test asserted via `TestOpenAIProviderRateLimitBackoff` (existing) which exercises the `chat()` path |
+| RV-2 | Add `reasoning: str = ""` field to `LLMResponse`. In `openai_response_to_llm_response()`, read `getattr(msg, "reasoning", None) or getattr(msg, "reasoning_content", None)`. In `_anthropic_response_to_llm_response()`, handle `thinking` blocks and map them to `reasoning`. | `TestOpenAIResponseReasoning` × 4 (field populated from msg.reasoning, empty when absent, defaults to empty, no effect on text field) |
+| RV-3 | In `harness/agent.py`, log `"reasoning": response.reasoning` (not `response.text`) in the JSONL trajectory, only when non-empty. Fix `scripts/trajectory_to_md.py`: (a) render `reasoning` field as `<details><summary>Reasoning</summary>` block; (b) handle `blast_command` key in tool_call events (renders as `BLAST` label); (c) handle `summary` key in tool_result events alongside `stdout`. | `TestTrajectoryToMd` × 6 (reasoning details block, narration without details, blast label, command label, blast summary key, bash stdout key) |
+| RV-4 | In `OpenAIProvider.chat()`, when `reasoning_effort` is non-empty, append `\n\nReasoning: {effort}` to the system prompt before converting to OpenAI wire format. This adds the Harmony-format directive as belt-and-suspenders alongside the API parameter. | Exercised implicitly via `TestOpenAIProviderRateLimitBackoff` system-message path |
+
+**Files:** `harness/config.py`, `harness/llm.py`, `harness/agent.py`, `scripts/run_eval.py`, `scripts/trajectory_to_md.py`, `tests/test_agent_helpers.py`
+
+**New tests:** 10 (`TestOpenAIResponseReasoning` × 4, `TestTrajectoryToMd` × 6).
+Test count after merge: 189/189 passing in `tests/test_agent_helpers.py`; 392/393 overall.
