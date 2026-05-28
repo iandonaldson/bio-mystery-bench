@@ -819,3 +819,70 @@ question I just solved?" If the latter, generalise or omit it.
 
 **Cross-reference:** §L-12 (empty BLAST results vs missing binary) — the 16S
 BLAST recipe removed from blast-search SKILL.md in BP-4 was the motivating case.
+
+---
+
+## L-29: For gpt-oss-120b via Cerebras, msg.content is empty during tool calls — reasoning is in msg.reasoning
+
+**Lesson (2026-05-28):** After the hb002 validation run with gpt-oss-120b on Cerebras, all
+trajectory files showed blank "Agent reasoning" sections. The root cause: gpt-oss-120b uses
+OpenAI's Harmony format, which routes output to three channels — `analysis` (CoT), `commentary`
+(tool calls), and `final` (text response). The Cerebras Chat Completions API collapses these:
+`msg.content` carries only the `final` channel text, which is always empty during tool-call
+steps. The CoT is returned separately in `msg.reasoning` (Cerebras `text_parsed` format).
+
+**Rule:**
+- For gpt-oss-120b via Cerebras, always read `getattr(msg, "reasoning", None)` in addition
+  to `msg.content`. Never treat `msg.content = ""` during tool calls as "the model produced
+  no reasoning."
+- When using the Chat Completions endpoint (not native Harmony format), pass
+  `reasoning_effort="high"` as an API-level parameter to activate maximum CoT depth. The
+  Harmony-format equivalent (`Reasoning: high` in the system message) can be added as
+  belt-and-suspenders but is not the primary mechanism via Chat Completions.
+- Providers that handle Harmony internally (Cerebras, Ollama, vLLM, HuggingFace) do not
+  require any developer-side tokenisation of Harmony delimiters.
+
+**Detection:**
+```python
+# In openai_response_to_llm_response(), always extract reasoning alongside content:
+reasoning = getattr(msg, "reasoning", None) or getattr(msg, "reasoning_content", None) or ""
+```
+
+**Cross-reference:** §L-26 (BLAST silent failure patterns) — a similar "empty output ≠ no
+result" diagnostic trap.
+
+---
+
+## L-30: Defensive getattr() needed when Provider methods are tested via __new__
+
+**Lesson (2026-05-28):** When new instance variables are added to a Provider class `__init__`
+(e.g. `self._reasoning_effort`), existing tests that construct the Provider using
+`OpenAIProvider.__new__(OpenAIProvider)` bypass `__init__` entirely. Any method that
+reads those variables will raise `AttributeError` on those test instances.
+
+**Rule:** In any `Provider.chat()` or other method that reads an instance variable that was
+added after the class was first written, use `getattr(self, "_var_name", default)` rather
+than direct attribute access. This makes the method forward-compatible with `__new__`-based
+test stubs without requiring every test fixture to be updated.
+
+**How to apply:**
+```python
+# Fragile — breaks tests that use __new__:
+if self._reasoning_effort:
+    ...
+
+# Defensive — works with __new__ stubs:
+effort = getattr(self, "_reasoning_effort", "")
+if effort:
+    ...
+```
+
+**Detection:**
+```bash
+# If tests for a Provider method suddenly fail with AttributeError after adding __init__ vars:
+grep -n "__new__(OpenAIProvider)\|__new__(AnthropicProvider)" tests/
+# These test stubs need either: (a) the attribute set explicitly, or (b) the method uses getattr()
+```
+
+**Cross-reference:** §L-21 (AgentRun.__init__ coordination) — a similar class where new
+attributes added by one agent need the CI guard.
