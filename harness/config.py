@@ -26,6 +26,8 @@ class RunConfig:
     # Cost per million tokens (claude-sonnet-4-6 as of 2026-05)
     cost_per_million_input: float = 3.0
     cost_per_million_output: float = 15.0
+    # BT-1: refuse remote BLAST queries larger than this (0 = disabled)
+    blast_max_query_bp: int = 1500
     # Critic agent — list of injection point names (empty = disabled)
     critic_injection_points: list = field(default_factory=list)
     critic_model: str = ""  # empty = use same model as agent

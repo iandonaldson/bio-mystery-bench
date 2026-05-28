@@ -446,7 +446,9 @@ class AgentRun:
                         })
 
                         result_text += "\n\n" + _progress_footer(
-                            self.steps, self.config.max_steps, self.input_tokens
+                            self.steps, self.config.max_steps, self.input_tokens,
+                            elapsed_seconds=time.monotonic() - start,
+                            run_timeout_seconds=self.config.run_timeout_seconds,
                         )
 
                         tool_results.append({
@@ -487,7 +489,11 @@ class AgentRun:
                             })
                             result_text = (
                                 f"BLAST error: {missing_msg}\n\n"
-                                + _progress_footer(self.steps, self.config.max_steps, self.input_tokens)
+                                + _progress_footer(
+                                    self.steps, self.config.max_steps, self.input_tokens,
+                                    elapsed_seconds=time.monotonic() - start,
+                                    run_timeout_seconds=self.config.run_timeout_seconds,
+                                )
                             )
                             tool_results.append({
                                 "type": "tool_result",
@@ -495,6 +501,46 @@ class AgentRun:
                                 "content": result_text,
                             })
                             continue
+
+                        # BT-1: refuse remote queries that exceed the size cap — they
+                        # always time out after 10 min and waste wall-clock budget.
+                        if remote and self.config.blast_max_query_bp > 0:
+                            try:
+                                bp_out, _, _ = self.container.exec_command(
+                                    f"awk 'NF && !/^>/{{n+=length($0)}} END{{print n+0}}' {query}",
+                                    timeout=10,
+                                )
+                                bp_count = int(bp_out.strip()) if bp_out.strip().isdigit() else 0
+                            except Exception:
+                                bp_count = 0
+                            if bp_count > self.config.blast_max_query_bp:
+                                size_msg = (
+                                    f"Query too large ({bp_count:,} bp) — remote BLAST times out "
+                                    f"on queries >{self.config.blast_max_query_bp:,} bp. "
+                                    f"Extract a ≤500 bp subsequence (e.g. a 16S primer region) "
+                                    f"and retry."
+                                )
+                                self.logger.log("tool_call", {"blast_command": f"[size-check refused] {query}"})
+                                self.logger.log("tool_result", {
+                                    "blast_command": f"[size-check refused] {query}",
+                                    "summary": f"rc=-1: {size_msg}",
+                                    "returncode": -1,
+                                })
+                                result_text = (
+                                    f"BLAST error (rc=-1):\n{size_msg}\n\n"
+                                    + _progress_footer(
+                                        self.steps, self.config.max_steps, self.input_tokens,
+                                        elapsed_seconds=time.monotonic() - start,
+                                        run_timeout_seconds=self.config.run_timeout_seconds,
+                                    )
+                                )
+                                tool_results.append({
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_call.id,
+                                    "content": result_text,
+                                    "is_error": True,
+                                })
+                                continue
 
                         # BP-3: enforce ≤3 remote BLAST calls/s per NCBI guidelines.
                         if remote:
@@ -544,7 +590,9 @@ class AgentRun:
                             "returncode": rc,
                         })
                         result_text += "\n\n" + _progress_footer(
-                            self.steps, self.config.max_steps, self.input_tokens
+                            self.steps, self.config.max_steps, self.input_tokens,
+                            elapsed_seconds=time.monotonic() - start,
+                            run_timeout_seconds=self.config.run_timeout_seconds,
                         )
                         tool_results.append({
                             "type": "tool_result",
@@ -843,28 +891,48 @@ def _extract_text(content: Any) -> str:
     return str(content)
 
 
-def _progress_footer(steps_used: int, max_steps: int, input_tokens: int) -> str:
-    """Append a step-progress notice to each tool result so the agent can self-regulate."""
+def _progress_footer(
+    steps_used: int,
+    max_steps: int,
+    input_tokens: int,
+    elapsed_seconds: float = 0.0,
+    run_timeout_seconds: int = 0,
+) -> str:
+    """Append a step/time progress notice to each tool result so the agent can self-regulate."""
     remaining = max_steps - steps_used
-    pct = steps_used / max_steps if max_steps else 1.0
+    step_pct = steps_used / max_steps if max_steps else 1.0
     tokens_k = input_tokens / 1000
 
-    if pct >= 0.90:
+    time_pct = elapsed_seconds / run_timeout_seconds if run_timeout_seconds else 0.0
+    combined_pct = max(step_pct, time_pct)
+
+    if combined_pct >= 0.90:
         urgency = (
-            f"⚠ CRITICAL: only {remaining} steps remaining. "
-            "Stop all further analysis and state your FINAL ANSWER now, "
+            f"⚠ CRITICAL: only {remaining} steps remaining"
+            + (f" and {run_timeout_seconds - int(elapsed_seconds)}s of wall-clock budget" if run_timeout_seconds else "")
+            + ". Stop all further analysis and state your FINAL ANSWER now, "
             "even if you would prefer more validation."
         )
-    elif pct >= 0.75:
+    elif combined_pct >= 0.75:
         urgency = (
-            f"⚠ WARNING: {remaining} steps remaining ({steps_used}/{max_steps} used). "
-            "Begin wrapping up — cross-validation is complete enough. "
-            "Prepare to state your FINAL ANSWER within the next few steps."
+            f"⚠ WARNING: {remaining} steps remaining ({steps_used}/{max_steps} used)"
+            + (f", {run_timeout_seconds - int(elapsed_seconds)}s wall-clock remaining" if run_timeout_seconds else "")
+            + ". Begin wrapping up — cross-validation is complete enough. "
+            "Prepare to state your FINAL ANSWER within the next few steps. "
+            "Each remote BLAST timeout costs 10 minutes — do not start new BLAST calls."
         )
     else:
         urgency = ""
 
-    footer = f"[Progress: step {steps_used}/{max_steps} | context ~{tokens_k:.0f}k tokens | {remaining} steps remaining]"
+    if run_timeout_seconds and elapsed_seconds:
+        time_part = f" | elapsed {int(elapsed_seconds)}s/{run_timeout_seconds}s"
+    else:
+        time_part = ""
+
+    footer = (
+        f"[Progress: step {steps_used}/{max_steps}{time_part}"
+        f" | context ~{tokens_k:.0f}k tokens | {remaining} steps remaining]"
+    )
     if urgency:
         footer += f"\n{urgency}"
     return footer

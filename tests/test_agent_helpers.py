@@ -12,6 +12,7 @@ from harness.agent import (
     _get_blast_version,
     _handle_abort,
     _has_final_answer_marker,
+    _progress_footer,
     _summarize_blast_output,
     _BLAST_RC_MESSAGES,
     _BLAST_OUTFMT,
@@ -1728,9 +1729,11 @@ class TestTimeStepMessaging:
     def test_system_prompt_does_not_mention_run_timeout(self):
         assert "run timeout" not in self._prompt()
 
-    # TM-1: no-wall-clock note must be present
-    def test_system_prompt_states_no_wall_clock_time_limit(self):
-        assert "no wall-clock time limit" in self._prompt()
+    # BT-2: system prompt must state the real 60-minute wall-clock limit (not claim "no limit")
+    def test_system_prompt_states_wall_clock_limit(self):
+        prompt = self._prompt()
+        assert "no wall-clock time limit" not in prompt
+        assert "60-minute wall-clock time limit" in prompt
 
     # TM-2: environment context includes step budget with max_steps value
     def test_environment_context_includes_step_budget(self):
@@ -2209,3 +2212,149 @@ class TestBlastRateLimiting:
         mock_sleep.assert_called_once()
         sleep_duration = mock_sleep.call_args[0][0]
         assert 0 < sleep_duration <= 1.0 / 3.0
+
+
+# ---------------------------------------------------------------------------
+# _progress_footer  (BT-3)
+# ---------------------------------------------------------------------------
+
+class TestProgressFooter:
+    """BT-3: wall-clock elapsed time appears in footer and drives urgency text."""
+
+    def test_basic_footer_no_time(self):
+        footer = _progress_footer(10, 100, 5000)
+        assert "step 10/100" in footer
+        assert "90 steps remaining" in footer
+        assert "~5k tokens" in footer
+        assert "elapsed" not in footer
+
+    def test_elapsed_time_appears_in_footer(self):
+        footer = _progress_footer(10, 100, 5000, elapsed_seconds=900.0, run_timeout_seconds=3600)
+        assert "elapsed 900s/3600s" in footer
+
+    def test_step_warning_at_75_pct(self):
+        footer = _progress_footer(75, 100, 5000, elapsed_seconds=100.0, run_timeout_seconds=3600)
+        assert "WARNING" in footer
+        assert "25 steps remaining" in footer
+
+    def test_step_critical_at_90_pct(self):
+        footer = _progress_footer(90, 100, 5000, elapsed_seconds=100.0, run_timeout_seconds=3600)
+        assert "CRITICAL" in footer
+
+    def test_wall_clock_warning_at_75_pct(self):
+        # Steps at 50% but wall clock at 75% — wall clock should trigger warning
+        footer = _progress_footer(50, 100, 5000, elapsed_seconds=2700.0, run_timeout_seconds=3600)
+        assert "WARNING" in footer
+        assert "900s wall-clock remaining" in footer
+
+    def test_wall_clock_critical_at_90_pct(self):
+        footer = _progress_footer(50, 100, 5000, elapsed_seconds=3300.0, run_timeout_seconds=3600)
+        assert "CRITICAL" in footer
+
+    def test_no_urgency_below_75_pct(self):
+        footer = _progress_footer(50, 100, 5000, elapsed_seconds=1000.0, run_timeout_seconds=3600)
+        assert "WARNING" not in footer
+        assert "CRITICAL" not in footer
+
+    def test_blast_hint_in_wall_clock_warning(self):
+        footer = _progress_footer(50, 100, 5000, elapsed_seconds=2800.0, run_timeout_seconds=3600)
+        assert "BLAST" in footer
+
+
+# ---------------------------------------------------------------------------
+# BT-1: blast query size cap
+# ---------------------------------------------------------------------------
+
+class TestBlastQuerySizeCap:
+    """BT-1: blast_search refuses remote queries larger than blast_max_query_bp."""
+
+    def _make_blast_run_with_size(self, query_bp: int, max_bp: int = 1500):
+        """Build an AgentRun that issues one blast_search call; container reports query_bp bases."""
+        from harness.llm import LLMResponse, LLMUsage, LLMToolCall
+        from harness.config import RunConfig
+
+        tc = LLMToolCall(
+            id="tu_bt1",
+            name="blast_search",
+            input={
+                "query": "/workspace/scratch/big_query.fasta",
+                "database": "nt",
+                "program": "blastn",
+                "max_hits": 5,
+            },
+        )
+        responses = [
+            LLMResponse(
+                stop_reason="tool_use",
+                text="",
+                tool_calls=[tc],
+                usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+                raw_content=[{"type": "tool_use", "id": "tu_bt1", "name": "blast_search",
+                              "input": tc.input}],
+            ),
+            LLMResponse(
+                stop_reason="end_turn",
+                text="FINAL ANSWER: unknown",
+                tool_calls=[],
+                usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+                raw_content=[],
+            ),
+        ]
+        client = MagicMock()
+        client.chat.side_effect = responses
+
+        def exec_side_effect(command, timeout=300):
+            if "-version" in command:
+                return ("blastn: 2.16.0\n", "", 0)
+            if "awk" in command and "NF" in command:
+                # size-check command — return the mocked bp count
+                return (f"{query_bp}\n", "", 0)
+            # should not reach the actual blast call
+            return ("", "", 0)
+
+        container = MagicMock()
+        container.exec_command.side_effect = exec_side_effect
+
+        config = RunConfig(
+            max_steps=10,
+            step_timeout_seconds=30,
+            run_timeout_seconds=60,
+            blast_max_query_bp=max_bp,
+        )
+        run = AgentRun(
+            client=client,
+            container=container,
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+        return run, container
+
+    def test_oversized_query_refused_without_blast_call(self):
+        run, container = self._make_blast_run_with_size(query_bp=2000, max_bp=1500)
+        run.run()
+        calls = [str(c) for c in container.exec_command.call_args_list]
+        # The actual blastn command should never have been called
+        assert not any("blastn -db" in c for c in calls)
+
+    def test_oversized_query_logs_size_error(self):
+        run, _ = self._make_blast_run_with_size(query_bp=2000, max_bp=1500)
+        run.run()
+        log_calls = run.logger.log.call_args_list
+        summaries = [str(c) for c in log_calls]
+        assert any("Query too large" in s or "size-check" in s for s in summaries)
+
+    def test_within_limit_proceeds_to_blast(self):
+        run, container = self._make_blast_run_with_size(query_bp=400, max_bp=1500)
+        run.run()
+        calls = [str(c) for c in container.exec_command.call_args_list]
+        assert any("blastn -db" in c for c in calls)
+
+    def test_zero_limit_disables_check(self):
+        """blast_max_query_bp=0 disables the pre-check entirely."""
+        run, container = self._make_blast_run_with_size(query_bp=9999, max_bp=0)
+        run.run()
+        calls = [str(c) for c in container.exec_command.call_args_list]
+        assert any("blastn -db" in c for c in calls)

@@ -10,6 +10,23 @@ description: >
 
 # blast-search skill
 
+## ⚠ CRITICAL: Always start with a short query (≤500 bp)
+
+**Never BLAST the full genome or any sequence >1500 bp remotely — it will always time out.**
+
+Remote BLAST on large queries (>1 kb) reliably times out after 10 minutes, burning your
+entire wall-clock budget on a call that will never succeed. Start small:
+
+1. Extract a short representative region: `samtools faidx genome.fasta region:1-500`
+2. If you know the marker gene (e.g. 16S rRNA), find its primer motif and extract 200–500 bp
+   around it: `grep -ob 'AGAGTTTGATCCTGGCTCAGG' genome.fasta` to locate the motif, then extract.
+3. If a 500 bp query times out, try a **different genomic region**, not a larger one.
+4. Queries ≤500 bp run in 3–8 minutes. Queries >1 kb run for 10 minutes then fail.
+
+The harness enforces a 1500 bp hard limit — queries larger than this are refused before dispatch.
+
+---
+
 ## Topic index
 
 1. Use the blast_search tool — not direct bash
@@ -50,14 +67,13 @@ Docker image (`--rebuild` flag).
 
 ## 2. Query size guidance
 
-Remote BLAST has practical size limits:
+Remote BLAST has strict practical limits:
 
-- **≤5000 bp** — safe for remote searches against nt/nr.
-- **>5000 bp** — high probability of rc=-1 timeout. Extract a representative
-  sub-region before submitting (e.g. `head -c 1500` of the sequence, or the
-  first 1500 bp of any target gene).
+- **≤500 bp** — ideal; returns in 3–8 minutes reliably.
+- **500–1500 bp** — acceptable; may take 5–10 minutes.
+- **>1500 bp** — the harness refuses dispatch immediately (saves 10 minutes of timeout).
 - A timeout returns rc=-1 and empty output. This is **not** "no hits" — it
-  means the query was too large or the network stalled.
+  means the query was too large or the network stalled. Try a shorter, different region.
 
 ---
 

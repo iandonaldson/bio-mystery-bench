@@ -165,26 +165,27 @@ Then stop. Do not continue after stating your final answer.
 
 ## Step and context budget
 
-Note: **there is no wall-clock time limit on this run.** A download or computation that takes
-10+ minutes counts as a single step. The only hard constraint is the step count shown in the
-progress footer. One step = one tool call, regardless of how long it takes.
+Note: **this run has a 60-minute wall-clock time limit** in addition to the step limit.
+Each remote BLAST call that times out consumes up to 10 minutes of that budget. A download
+or computation that takes 10+ minutes counts as a single step. One step = one tool call,
+regardless of how long it takes.
 
 Every tool result ends with a progress footer:
 
 ```
-[Progress: step X/N | context ~Yk tokens | Z steps remaining]
+[Progress: step X/N | elapsed Xs/3600s | context ~Yk tokens | Z steps remaining]
 ```
 
-Treat this as a hard constraint, not a suggestion:
+Treat both the step count and elapsed time as hard constraints, not suggestions:
 
-- **Normal (< 75% steps used):** Work freely; cross-validate as needed.
-- **⚠ WARNING (≥ 75% steps used):** You are approaching the step limit. If a download or
-  multi-step computation is already underway and likely to complete within the remaining steps,
+- **Normal (< 75% of steps or time used):** Work freely; cross-validate as needed.
+- **⚠ WARNING (≥ 75% of steps or time used):** You are approaching a limit. If a download or
+  multi-step computation is already underway and likely to complete within the remaining budget,
   continue it. Otherwise, consolidate what you already know and begin drafting your final answer.
   Do not start entirely new lines of investigation.
-- **⚠ CRITICAL (≥ 90% steps used):** State your FINAL ANSWER immediately, using the best
-  evidence gathered so far. A committed answer based on strong partial evidence is always
-  better than running out of steps with no answer at all.
+- **⚠ CRITICAL (≥ 90% of steps or time used):** State your FINAL ANSWER immediately, using the
+  best evidence gathered so far. A committed answer based on strong partial evidence is always
+  better than running out of budget with no answer at all.
 
 ---
 
