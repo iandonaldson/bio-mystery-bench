@@ -1,16 +1,23 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-26 — close-session after RERUN-6 and BF-1..4 (PR #83). RERUN-6 ran to completion
-(5×5 attempts, two Docker restarts required); diagnosed and fixed a three-layer BLAST silent
-failure; BF-1..4 merged (blast in Dockerfile, pre-check, preflight, SKILL.md rewrite, L-26).
-348/349 tests passing. Walkthrough 13 written. All PRs #1–#83 now on main.
+2026-05-28 — close-session after IO-1 VirtioFS fix (PR #85). Diagnosed macOS Docker Desktop
+VirtioFS EDEADLK bug causing all hb022/hb053 attempts to fail with "Resource deadlock avoided";
+fixed by replacing data_dir bind mount with put_archive into container overlay FS. 4 new tests.
+352/353 tests passing. Walkthrough 14 written. RERUN-6 redux running (hb022 4/5, hb053 2/5
+confirmed; hb053 attempts 2-4 re-running with gpt-oss-120b after qwen-3-235b-a22b-instruct-2507
+was silently dropped by Cerebras mid-run).
+
+Previous: 2026-05-26 — close-session after RERUN-6 and BF-1..4 (PR #83). RERUN-6 ran to
+completion (5×5 attempts, two Docker restarts required); diagnosed and fixed three-layer BLAST
+silent failure; BF-1..4 merged (blast in Dockerfile, pre-check, preflight, SKILL.md rewrite,
+L-26). 348/349 tests passing. Walkthrough 13 written.
 
 ## Current status
-RERUN-6 complete (benchmark run validated SI/SK/SL/TM/GD/CA remediations). BLAST silent
-failure root-caused and fixed (BF-1..4, PR #83). Docker image needs rebuild before next
-eval run to pick up the new `blast` package. Next eval run (RERUN-6 redux) expected to show
-hb002 improvement from 0/5 to 3–5/5 with working BLAST.
+RERUN-6 redux in progress (5 problems × 5 attempts, Cerebras/Qwen3 originally, gpt-oss-120b
+for hb053 tail after Cerebras model dropout). hb002 improved from 0/5 (RERUN-6) to 2/5 (redux)
+— BLAST now works; remaining 3 failures due to timeout on large sequences and taxid hallucination
+(taxdb not installed). hb022 confirmed 4/5. VirtioFS EDEADLK fixed (IO-1, PR #85).
 
 ## Active feature slice
 None — all planned slices complete. Suggested next: rebuild Docker + re-run RERUN-6 to
@@ -94,12 +101,23 @@ confirm hb002 improvement; or begin curated tool wrappers (DESeq2/STAR/featureCo
 - Close-session docs reconciliation (PR #84)
   features.md: RERUN-6 + BF sections added, GD-5 note; claude-progress.txt updated;
   walkthrough 13.rerun6_blast_fixes.md written; README References updated
+- IO-1: Fix macOS VirtioFS EDEADLK for data files (PR #85, 2026-05-28)
+  Replaced data_dir bind mount with put_archive into container overlay FS;
+  4 new tests (TestScratchDirLocation::test_data_dir_not_in_volumes + TestCopyDataToContainer);
+  L-27 added to code-learnings; walkthrough 14 written
 
 ## Pending slices
 
 - Curated bioinformatics tool wrappers (DESeq2, STAR, featureCounts) — not yet started
-- RERUN-6 redux: re-run with rebuilt Docker image (blast now in Dockerfile via BF-1) to
-  validate hb002 improvement. Run command same as RERUN-6; add `--results-dir results/rerun6-redux`.
+- RERUN-6 redux: IN PROGRESS — hb053 attempts 2-4 still running (gpt-oss-120b on Cerebras).
+  hb022 4/5 confirmed; hb002 2/5 confirmed. Results in results/rerun6-redux/.
+- BLAST improvements (identified but not yet implemented; user said "Not yet"):
+  - Pass `rc` into `_summarize_blast_output` with rc-specific error messages
+    (rc=-1 → "timed out/query too large"; rc=5 → "network error"; rc=255 → "rate-limited")
+  - Install taxdb in Dockerfile to fix taxid→species-name lookup (prevents hallucination
+    when agent recalls taxid from memory)
+  - Update blast-search SKILL.md with query size guidance (≤5000 bp for remote BLAST;
+    use first 1500 bp of 16S rRNA gene rather than full genome)
 
 ## Documentation
 Walkthroughs in documents/code_walkthroughs/:
@@ -111,48 +129,51 @@ Walkthroughs in documents/code_walkthroughs/:
 - 9.Agent_A_walkthrough.md — general method advice + in-container reference SKILLs (GM)
 - 12.rerun5_remediations.md — RERUN-5 harness remediations (SI/SK/SL/TM/GD/CA)
 - 13.rerun6_blast_fixes.md — RERUN-6 run + three-layer BLAST failure diagnosis and BF-1..4 fix
+- 14.io1_virtiofs_fix.md — macOS VirtioFS EDEADLK fix (IO-1, PR #85)
 
 ## Next steps (in priority order)
-1. Rebuild Docker image + RERUN-6 redux: `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .`
-   then re-run RERUN-6 to confirm hb002 improvement with working BLAST (expected 3–5/5 from 0/5).
-2. CI guard: AST-based test that asserts every `self.X` read in `AgentRun._loop` has a matching
+1. RERUN-6 redux: await hb053 completion (attempts 2-4 running with gpt-oss-120b);
+   document final results; compare hb002 redux vs RERUN-6 baseline.
+2. BLAST rc-specific errors: pass `rc` into `_summarize_blast_output` so timeout/rate-limit
+   is distinguished from genuine no-hits (identified this session, user deferred).
+3. taxdb in Dockerfile: prevents taxid hallucination in hb002-style problems.
+4. CI guard: AST-based test that asserts every `self.X` read in `AgentRun._loop` has a matching
    `self.X = …` initialiser in `AgentRun.__init__` (see L-21).
-3. Curated tool wrappers: DESeq2, STAR, featureCounts SKILL files + Docker integration.
-4. Full dataset (99 problems): requires HuggingFace approval + Azure VM setup
+5. Curated tool wrappers: DESeq2, STAR, featureCounts SKILL files + Docker integration.
+6. Full dataset (99 problems): requires HuggingFace approval + Azure VM setup
    (see documents/scaling_with_azure.md).
-5. Groq Dev Tier upgrade: unavailable since ~Apr 2026, no ETA.
+7. Groq Dev Tier upgrade: unavailable since ~Apr 2026, no ETA.
 
 ## Blockers / open questions for human
-- hb053 (heat stress) — model cannot identify heat stress from Brachypodium transcriptome;
-  human_solvable=False. No action needed.
+- hb053 (heat stress) — attempts 2-4 re-running with gpt-oss-120b (Cerebras dropped qwen model mid-run).
+  Attempts 0 and 1 both correct ("heat stress"). human_solvable=False.
+- BLAST rc-specific errors and taxdb: user deferred ("Not yet") — confirm before implementing.
 - Full 99-problem dataset requires HuggingFace approval
 - Groq Dev Tier upgrades temporarily unavailable (since ~Apr 2026, no ETA)
 - Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md
-- Docker image rebuild needed before next eval: BF-1 added `blast` to micromamba install.
-  Run: `docker build -t bio-mystery-bench:latest -f docker/Dockerfile .` from repo root.
-  SI hash-gating will also detect the stale image automatically on first eval run.
 
 ## Test status
-348/349 passing on main (1 pre-existing failure in
-test_analyze_trajectories::TestFindDataCache::test_returns_none_when_missing).
+352/353 passing on main (1 pre-existing failure in
+test_analyze_trajectories::TestFindDataCache::test_returns_none_when_missing — environment-dependent:
+_find_data_cache walks up from the tmp_path and finds the real .data-cache at the repo root).
 
-New tests added this session (BF-1..4, PR #83):
-- 2 tests: TestBlastInDockerfile (BF-1: Dockerfile has blast, BASH_TOOL mentions blast)
-- 3 tests: TestBlastMissingBinaryPreCheck (BF-2: pre-check returns error not "No hits", no blast cmd run, pipefail prefix)
-- 2 tests: TestPreflightContainerTools (BF-3: exits on missing binary, passes on present)
+New tests added this session (IO-1, PR #85):
+- 1 test: TestScratchDirLocation::test_data_dir_not_in_volumes (data_dir absent from volumes dict)
+- 3 tests: TestCopyDataToContainer (put_archive called, not called when no data_dir, tar contains files)
 
 ## Notes for next agent session
 - Provider flags: --provider anthropic|openai|ollama|groq, --api-base-url, --api-key, --judge-model
 - Groq: reads GROQ_API_KEY, auto base URL https://api.groq.com/openai/v1
 - Cerebras: use --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key $CEREBRAS_API_KEY
-  Available models: qwen-3-235b-a22b-instruct-2507, llama3.1-8b, gpt-oss-120b
+  Current available models: gpt-oss-120b, zai-glm-4.7
+  NOTE: qwen-3-235b-a22b-instruct-2507 was silently removed by Cerebras 2026-05-28 mid-run
 - Two-round critic: --critic-injection-points after_final_answer --critic-injection-points after_critic_response
   --max-critic-rounds 2
-- Docker image rebuild required (BF-1 added blast to micromamba install; SI hash-gating detects automatically)
-  Command: docker build -t bio-mystery-bench:latest -f docker/Dockerfile . (from repo root)
+- Docker image: IO-1 (PR #85) removed data_dir bind mount; data now injected via put_archive.
+  No Dockerfile change in IO-1 — image from BF-1 (PR #83) is still current.
 - /workspace/skills/ now has 5 files: deg-functional-enrichment.md, chipseq-tf-identification.md,
   genome-retrieval.md, ucsc-sequence-fetch.md, blast-search.md
 - SKILLS/critic-guidance/SKILL.md is host-side only (not in Docker image)
-- RERUN-6 results in results/rerun6/ — hb002 was 0/5 due to BLAST binary missing (now fixed by BF-1)
-  Redux run expected to show hb002 improvement; compare with results/rerun6/ as baseline
-- All fixes in PRs #1–#83 merged to main
+- RERUN-6 redux in progress: results/rerun6-redux/; compare with results/rerun6/ as baseline
+  hb002: 2/5 (improved from 0/5); hb022: 4/5; hb053: 2/5 (attempts 2-4 still pending)
+- All fixes in PRs #1–#85 merged to main

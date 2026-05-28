@@ -80,14 +80,22 @@ ensures no state contamination between runs.
 
 **Constructor parameters:**
 - `image` — Docker image name
-- `data_dir` — host path mounted read-only as `/workspace/data`
+- `data_dir` — host path whose contents are copied into `/workspace/data` inside the
+  container via `put_archive` (NOT bind-mounted — see IO-1 below)
 - `memory` / `cpus` — resource limits enforced by the Docker daemon
 - `artifacts_dir` — if set, scratch contents are copied here before teardown
 
 ### `start()`
 Creates a `.scratch/<run-id>/` directory inside the project tree and mounts it
 read-write as `/workspace/scratch`. Starts the container with `detach=True` and
-`remove=True` (auto-deleted on stop).
+`remove=True` (auto-deleted on stop). After the container starts, calls
+`_copy_data_to_container()` if `data_dir` is set.
+
+### `_copy_data_to_container()`
+Streams data files into the container's overlay FS via the Docker SDK
+`put_archive("/workspace/data", tar_stream)` call. Builds a tar archive in memory
+from all files in `data_dir` and sends it in one call. The overlay FS lives inside
+the Docker VM and is immune to the macOS VirtioFS EDEADLK bug (see IO-1).
 
 ### `exec_command(command, timeout)`
 Runs a bash command inside the container via `docker exec`, returning
@@ -108,13 +116,15 @@ if an exception is raised mid-run.
 
 ### Filesystem safety
 Scratch directories use a relative `.scratch/` path, keeping all host-side writes
-inside the project directory. The container sees nothing of the Mac filesystem
-beyond the two explicit mounts (data: read-only, scratch: read-write).
+inside the project directory. The container's `/workspace/scratch` is bind-mounted
+from `.scratch/<run-id>/`. Data files are injected via overlay FS (not bind-mounted)
+to avoid macOS VirtioFS EDEADLK (errno 35).
 
 **Tests:** `tests/test_container.py`
 - `TestContainerExecCommand` — `ContainerError` when not started, stdout/stderr/rc routing, None output handling
 - `TestCollectArtifacts` — file and subdirectory copying, empty-scratch no-op, no-artifacts-dir no-op
-- `TestScratchDirLocation` — confirms scratch is under `.scratch/`, not `/tmp`
+- `TestScratchDirLocation` — confirms scratch is under `.scratch/`, not `/tmp`; data_dir absent from volumes dict
+- `TestCopyDataToContainer` — `put_archive` called with `/workspace/data` dest, not called when `data_dir=None`, tar contains correct filenames
 - `TestContainerContextManager` — `__enter__` return value, `stop()` called on exit
 
 ---
@@ -795,3 +805,47 @@ Four sub-slices to fix the three-layer BLAST failure discovered during RERUN-6.
 
 **New tests:** 7 (3 `TestBlastMissingBinaryPreCheck`, 2 `TestBlastInDockerfile`, 2 `TestPreflightContainerTools`).
 Test count after merge: 348/349 (1 pre-existing failure in `TestFindDataCache::test_returns_none_when_missing`).
+
+---
+
+## ✅ IO-1: Fix macOS VirtioFS EDEADLK for Data Files (PR #85, 2026-05-28)
+
+### Background
+
+During RERUN-6 redux, every container run for hb022 and hb053 ended with
+`resource_abort` carrying the message "Resource deadlock avoided" (errno 35, EDEADLK).
+The root cause was Docker Desktop's **VirtioFS** filesystem driver.
+
+On long-running Docker Desktop sessions, VirtioFS enters a state where bind-mounted
+files appear to have data (correct file sizes in `ls -l`, non-zero `du`) but all
+read syscalls return errno 35. The tell-tale fingerprint: `ls -lh` shows `total 0`
+block count even for files reported as several hundred bytes.
+
+The affected mount was `data_dir` — the read-only bind mount the harness used to
+expose the problem's data files at `/workspace/data` inside the container. The scratch
+mount (`/workspace/scratch`) was unaffected because it was created fresh for each run.
+
+### Fix
+
+Replaced the read-only bind mount for `data_dir` with a `put_archive` call into the
+container's **overlay FS**. The overlay FS lives inside the Docker VM's virtual disk
+and is immune to VirtioFS bugs: it is never accessed through the VirtioFS layer.
+
+After `container.start()` launches the container (with only the scratch bind mount),
+`_copy_data_to_container()` builds a tar archive of `data_dir` in memory and calls
+`self._container.put_archive("/workspace/data", tar_stream)`. The Docker daemon writes
+the archive directly into the container's overlay FS. From the container's perspective
+`/workspace/data` is a normal directory — no VirtioFS involvement.
+
+Sub-slices:
+
+| ID | Scope | Test |
+|----|-------|------|
+| IO-1-1 | Remove `data_dir` bind mount from `start()` volumes dict. Add `_copy_data_to_container()` using `io.BytesIO` + `tarfile` + `self._container.put_archive("/workspace/data", buf)`. Call it at end of `start()` if `data_dir` is set and exists. | `TestScratchDirLocation::test_data_dir_not_in_volumes` — assert `str(data_dir)` absent from `call_kwargs["volumes"]`; `TestCopyDataToContainer::test_put_archive_called_with_data_files` — assert `put_archive` called once with dest `"/workspace/data"`; `TestCopyDataToContainer::test_put_archive_not_called_when_no_data_dir` — assert not called when `data_dir=None`; `TestCopyDataToContainer::test_tar_contains_data_files` — read the tar bytes from `call_args`, open with `tarfile`, assert filename in `getnames()` |
+| IO-1-2 | Add L-27 to `.claude/skills/code-learnings/SKILL.md`: macOS VirtioFS EDEADLK fingerprint + overlay FS workaround. | Source inspection |
+
+**Files:** `harness/container.py`, `.claude/skills/code-learnings/SKILL.md`,
+`tests/test_container.py`
+
+**New tests:** 4 (1 `TestScratchDirLocation::test_data_dir_not_in_volumes` + 3 `TestCopyDataToContainer`).
+Test count after merge: 352/353 (1 pre-existing failure in `TestFindDataCache::test_returns_none_when_missing`).
