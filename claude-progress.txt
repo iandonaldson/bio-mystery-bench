@@ -1,10 +1,15 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-28 — BLAST Plans Improvement (BP-1..5) planned and slices added to features.md and
+2026-05-28 — Model choice: gpt-oss-120b confirmed as new default Cerebras model after
+qwen-3-235b-a22b-instruct-2507 was fully deprecated by Cerebras on 2026-05-27. README
+Cost Estimates table and Cerebras example updated. Next session: run hb002 (3 attempts)
+with gpt-oss-120b in a new results directory to validate the new model.
+
+Previous: 2026-05-28 — BLAST Plans Improvement (BP-1..5) planned and slices added to features.md and
 claude-progress.txt. 18 new unit tests added (167/167 passing in test_agent_helpers.py).
 Code changes implemented (rc-specific messages, sscinames outfmt, rate limiting) and SKILL.md
-updated. Awaiting PR and session-close.
+updated. PR #87 merged.
 
 Previous: 2026-05-28 — close-session after IO-1 VirtioFS fix (PR #85). Diagnosed macOS Docker Desktop
 VirtioFS EDEADLK bug causing all hb022/hb053 attempts to fail with "Resource deadlock avoided";
@@ -26,7 +31,7 @@ in outfmt (_BLAST_OUTFMT), remote BLAST rate limiting (≤3/s), blast-search SKI
 RERUN-6 redux was in progress (hb022 4/5, hb002 2/5, hb053 2/5); awaiting final results.
 
 ## Active feature slice
-BP-1..5 BLAST Plans Improvement — code complete, tests passing, awaiting PR.
+None — model choice documented; next is hb002 validation run (see Next steps).
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
@@ -138,8 +143,16 @@ Walkthroughs in documents/code_walkthroughs/:
 - 15.blast_plans_improvement.md — BLAST rc diagnostics, sscinames, rate limiting (BP-1..5)
 
 ## Next steps (in priority order)
-1. RERUN-6 redux: await hb053 completion (attempts 2-4 running with gpt-oss-120b);
-   document final results; compare hb002 redux vs RERUN-6 baseline.
+1. hb002 validation run: run hb002 with 3 attempts using gpt-oss-120b in a NEW results
+   directory (e.g. results/gpt-oss-hb002-validation/). Use two-round critic flags:
+     python scripts/run_eval.py \
+       --provider openai --model gpt-oss-120b \
+       --api-base-url https://api.cerebras.ai/v1 --api-key "$CEREBRAS_API_KEY" \
+       --results-dir results/gpt-oss-hb002-validation \
+       --problem-ids hb002 --n-attempts 3 \
+       --critic-injection-points after_final_answer \
+       --critic-injection-points after_critic_response \
+       --max-critic-rounds 2
 2. BLAST rc-specific errors: pass `rc` into `_summarize_blast_output` so timeout/rate-limit
    is distinguished from genuine no-hits (identified this session, user deferred).
 3. taxdb in Dockerfile: prevents taxid hallucination in hb002-style problems.
@@ -151,10 +164,8 @@ Walkthroughs in documents/code_walkthroughs/:
 7. Groq Dev Tier upgrade: unavailable since ~Apr 2026, no ETA.
 
 ## Blockers / open questions for human
-- hb053 (heat stress) — attempts 2-4 re-running with gpt-oss-120b (Cerebras dropped qwen model mid-run).
-  Attempts 0 and 1 both correct ("heat stress"). human_solvable=False.
-- BP-1..5 PR: needs review + merge before next run.
-- taxdb in Dockerfile: not yet implemented — prevents taxid hallucination in hb002-style problems.
+- hb002 validation run in results/gpt-oss-hb002-validation/ not yet started — see Next steps #1.
+- BLAST rc-specific errors and taxdb: user deferred ("Not yet") — confirm before implementing.
 - Full 99-problem dataset requires HuggingFace approval
 - Groq Dev Tier upgrades temporarily unavailable (since ~Apr 2026, no ETA)
 - Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md
@@ -170,20 +181,21 @@ New tests added this session (BP-1..5):
 - 4 tests: TestBlastRateLimiting (init, update after remote call, no sleep for local, sleep enforced)
 
 ## Notes for next agent session
-- BP-1..5 changes are on branch close-io1-virtiofs (or create new branch); open PR before running
+- IMMEDIATE TASK: run hb002 validation (3 attempts, gpt-oss-120b, Cerebras).
+  Full command in Next steps #1 above. Create results dir first: mkdir -p results/gpt-oss-hb002-validation
+- Cerebras model: DEFAULT IS NOW gpt-oss-120b (qwen-3-235b-a22b-instruct-2507 deprecated 2026-05-27).
+  use --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key $CEREBRAS_API_KEY
+  Current available Cerebras models: gpt-oss-120b (production), zai-glm-4.7 (preview)
+- RERUN-6 redux COMPLETE: results/rerun6-redux/. Final scores:
+  hb002: 2/5 (pass@5=True), hb022: 0/5 (pass@5=False), hb020: 4/5, hb053: 2/5 (timeout), recqgsfxqqodhjens: 2/5
 - Provider flags: --provider anthropic|openai|ollama|groq, --api-base-url, --api-key, --judge-model
 - Groq: reads GROQ_API_KEY, auto base URL https://api.groq.com/openai/v1
-- Cerebras: use --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key $CEREBRAS_API_KEY
-  Current available models: gpt-oss-120b, zai-glm-4.7
-  NOTE: qwen-3-235b-a22b-instruct-2507 was silently removed by Cerebras 2026-05-28 mid-run
 - Two-round critic: --critic-injection-points after_final_answer --critic-injection-points after_critic_response
   --max-critic-rounds 2
 - Docker image: IO-1 (PR #85) removed data_dir bind mount; data now injected via put_archive.
-  No Dockerfile change in BP-1..5 — image from BF-1 (PR #83) is still current.
-- blast-search SKILL.md rebuilt (BP-4): 16S recipe removed; query-size, rc table, rate-limit added
-- /workspace/skills/ now has 5 files: deg-functional-enrichment.md, chipseq-tf-identification.md,
+  Image from BF-1 (PR #83) still current. No Dockerfile change in BP-1..5.
+- blast-search SKILL.md rebuilt (BP-4, PR #87): 16S recipe removed; query-size, rc table, rate-limit added
+- /workspace/skills/ has 5 files: deg-functional-enrichment.md, chipseq-tf-identification.md,
   genome-retrieval.md, ucsc-sequence-fetch.md, blast-search.md
 - SKILLS/critic-guidance/SKILL.md is host-side only (not in Docker image)
-- RERUN-6 redux in progress: results/rerun6-redux/; compare with results/rerun6/ as baseline
-  hb002: 2/5 (improved from 0/5); hb022: 4/5; hb053: 2/5 (attempts 2-4 still pending)
 - All fixes in PRs #1–#85 merged to main

@@ -142,11 +142,15 @@ Azure model names must match exactly what Azure expects (e.g. `Phi-4`, not `phi-
 # CEREBRAS_API_KEY must be set in .env
 python scripts/run_eval.py \
   --provider openai \
-  --model qwen3-235b-a22b-instruct-2507 \
+  --model gpt-oss-120b \
   --api-base-url https://api.cerebras.ai/v1 \
   --api-key "$CEREBRAS_API_KEY" \
   --dataset preview --n-attempts 1
 ```
+
+> **Note (2026-05-27):** `qwen-3-235b-a22b-instruct-2507` was deprecated by Cerebras on May 27 2026.
+> The current recommended Cerebras model is `gpt-oss-120b` (OpenAI GPT OSS 120B, ~3 000 tok/s,
+> $1.20/$1.20 per million tokens). See the Cost Estimates table for updated pricing.
 
 **Ollama (local, free):**
 ```bash
@@ -190,7 +194,7 @@ Costs depend on the model. All figures assume 5 preview problems × 1 attempt.
 | Phi-4 | Azure AI Foundry | $0.125 | $0.50 | ~$0.05–0.15 |
 | Phi-4-mini | Azure AI Foundry | $0.025 | $0.095 | ~$0.01–0.05 |
 | Meta-Llama-3.3-70B-Instruct | Azure AI Foundry | $0.59 | $0.79 | ~$0.10–0.30 |
-| qwen-3-235b-a22b-instruct-2507 | Cerebras | $0.60 | $0.60 | ~$0.30–0.60 |
+| gpt-oss-120b | Cerebras | $1.20 | $1.20 | ~$0.60–1.20 |
 | any model | Ollama | free | free | $0 |
 
 > Azure AI Foundry prices are approximate and subject to change. Verify at [ai.azure.com/explore/models](https://ai.azure.com/explore/models) before large runs.
