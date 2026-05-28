@@ -1,7 +1,12 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-28 — Model choice: gpt-oss-120b confirmed as new default Cerebras model after
+2026-05-28 — RV-1..4: Reasoning visibility for gpt-oss-120b. reasoning_effort config field,
+msg.reasoning captured from Cerebras responses, JSONL trajectory logging, trajectory_to_md.py
+blast_command/summary rendering fixed, <details> reasoning blocks in Markdown output. 10 new
+tests; 189/189 pass in test_agent_helpers.py; 392/393 overall.
+
+Previous: 2026-05-28 — Model choice: gpt-oss-120b confirmed as new default Cerebras model after
 qwen-3-235b-a22b-instruct-2507 was fully deprecated by Cerebras on 2026-05-27. README
 Cost Estimates table and Cerebras example updated. Next session: run hb002 (3 attempts)
 with gpt-oss-120b in a new results directory to validate the new model.
@@ -24,14 +29,14 @@ silent failure; BF-1..4 merged (blast in Dockerfile, pre-check, preflight, SKILL
 L-26). 348/349 tests passing. Walkthrough 13 written.
 
 ## Current status
-BLAST Plans Improvement (BP-1..5) implemented this session. 18 new tests; 167/167 passing in
-test_agent_helpers.py. Changes: rc-specific BLAST diagnostics (_BLAST_RC_MESSAGES), sscinames
-in outfmt (_BLAST_OUTFMT), remote BLAST rate limiting (≤3/s), blast-search SKILL.md rewrite
-(removed 16S recipe, added query-size/rc/rate-limit guidance), L-28 added to code-learnings.
-RERUN-6 redux was in progress (hb022 4/5, hb002 2/5, hb053 2/5); awaiting final results.
+RV-1..4 (reasoning visibility for gpt-oss-120b) implemented. 10 new tests; 189/189 passing in
+test_agent_helpers.py. Changes: reasoning_effort config (default "high") + API param; msg.reasoning
+read from Cerebras responses into LLMResponse.reasoning; JSONL log includes reasoning field when
+non-empty; trajectory_to_md.py now renders blast_command/summary keys and reasoning as <details>
+block; Harmony Reasoning: directive appended to system message for OpenAI-compatible providers.
 
 ## Active feature slice
-None — model choice documented; next is hb002 validation run (see Next steps).
+None — RV-1..4 complete; next is hb002 re-validation with reasoning visible (see Next steps).
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
@@ -118,6 +123,11 @@ None — model choice documented; next is hb002 validation run (see Next steps).
 
 ## Pending slices
 
+- RV-1..4: Reasoning visibility for gpt-oss-120b — implemented 2026-05-28 (commit cf07149):
+  RV-1: reasoning_effort config field + API param + --reasoning-effort CLI flag
+  RV-2: Read msg.reasoning from Cerebras responses; LLMResponse.reasoning field; Anthropic thinking blocks
+  RV-3: JSONL trajectory logs reasoning when non-empty; trajectory_to_md.py fixes (blast_command, summary, <details>)
+  RV-4: Append "Reasoning: {effort}" to system message for OpenAI-compatible providers
 - BLAST Plans Improvement (BP-1 to BP-5) — implemented 2026-05-28, awaiting PR:
   BP-1: rc-specific BLAST diagnostic messages (_BLAST_RC_MESSAGES in harness/agent.py)
   BP-2: sscinames in outfmt (_BLAST_OUTFMT constant; species column in hit table)
@@ -171,17 +181,19 @@ Walkthroughs in documents/code_walkthroughs/:
 - Azure VM setup (if needed for full benchmark) is user action — see documents/scaling_with_azure.md
 
 ## Test status
-167/167 passing in tests/test_agent_helpers.py (BP-1..5 changes, this session).
-352/353 passing overall on main (1 pre-existing failure in
+189/189 passing in tests/test_agent_helpers.py (RV-1..4 changes, this session).
+392/393 passing overall on main (1 pre-existing failure in
 test_analyze_trajectories::TestFindDataCache::test_returns_none_when_missing).
 
-New tests added this session (BP-1..5):
-- 9 tests: TestSummarizeBlastOutputRcDispatch (rc=-1,1,5,127,255,unknown,rc=0,partial-hits,table)
-- 5 tests: TestSummarizeBlastOutputSscinames (sscinames extraction, truncation, 12-col compat, outfmt const, header)
-- 4 tests: TestBlastRateLimiting (init, update after remote call, no sleep for local, sleep enforced)
+New tests added this session (RV-1..4):
+- 4 tests: TestOpenAIResponseReasoning (reasoning field populated, empty when absent, no effect on text)
+- 6 tests: TestTrajectoryToMd (reasoning <details>, narration only, blast_command label, command label,
+  blast summary key, bash stdout key)
 
 ## Notes for next agent session
-- IMMEDIATE TASK: run hb002 validation (3 attempts, gpt-oss-120b, Cerebras).
+- IMMEDIATE TASK: run hb002 re-validation (3 attempts, gpt-oss-120b, Cerebras) with reasoning visible.
+  Use --reasoning-effort high (default) and check JSONL trajectory for "reasoning" fields.
+  Check Markdown trajectory for <details> reasoning blocks.
   Full command in Next steps #1 above. Create results dir first: mkdir -p results/gpt-oss-hb002-validation
 - Cerebras model: DEFAULT IS NOW gpt-oss-120b (qwen-3-235b-a22b-instruct-2507 deprecated 2026-05-27).
   use --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key $CEREBRAS_API_KEY

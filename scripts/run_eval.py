@@ -368,10 +368,13 @@ def _run_problem(
               help="Model for the critic (default: same as agent model).")
 @click.option("--max-critic-rounds", default=2, show_default=True, type=int,
               help="Maximum number of critic exchanges per run.")
+@click.option("--reasoning-effort", default="high", show_default=True,
+              type=click.Choice(["high", "medium", "low", ""]),
+              help="Reasoning effort for OpenAI-compatible providers (e.g. Cerebras gpt-oss). Empty string omits the parameter.")
 def main(dataset, model, provider, api_base_url, api_key, judge_model,
          n_attempts, parallel, problem_ids, dry_run, resume, max_cost, max_steps,
          docker_memory, docker_cpus, results_dir, no_build, rebuild, dataset_path,
-         critic_injection_points, critic_model, max_critic_rounds):
+         critic_injection_points, critic_model, max_critic_rounds, reasoning_effort):
     """Run BioMysteryBench evaluation harness."""
 
     config = RunConfig(
@@ -388,6 +391,7 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         critic_injection_points=list(critic_injection_points),
         critic_model=critic_model,
         max_critic_rounds=max_critic_rounds,
+        reasoning_effort=reasoning_effort,
     )
 
     # Auto-resolve base URL for providers with a known default endpoint
@@ -454,7 +458,7 @@ def main(dataset, model, provider, api_base_url, api_key, judge_model,
         sys.exit(1)
 
     resolved_judge = judge_model or ("claude-haiku-4-5-20251001" if provider == "anthropic" else model)
-    client = build_provider(provider, resolved_key, resolved_base_url, resolved_judge)
+    client = build_provider(provider, resolved_key, resolved_base_url, resolved_judge, reasoning_effort)
 
     # Build critic client — may be a different provider from the agent
     critic_client = None

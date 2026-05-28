@@ -12,6 +12,7 @@ from harness.agent import (
     _get_blast_version,
     _handle_abort,
     _has_final_answer_marker,
+    _progress_footer,
     _summarize_blast_output,
     _BLAST_RC_MESSAGES,
     _BLAST_OUTFMT,
@@ -1728,9 +1729,11 @@ class TestTimeStepMessaging:
     def test_system_prompt_does_not_mention_run_timeout(self):
         assert "run timeout" not in self._prompt()
 
-    # TM-1: no-wall-clock note must be present
-    def test_system_prompt_states_no_wall_clock_time_limit(self):
-        assert "no wall-clock time limit" in self._prompt()
+    # BT-2: system prompt must state the real 60-minute wall-clock limit (not claim "no limit")
+    def test_system_prompt_states_wall_clock_limit(self):
+        prompt = self._prompt()
+        assert "no wall-clock time limit" not in prompt
+        assert "60-minute wall-clock time limit" in prompt
 
     # TM-2: environment context includes step budget with max_steps value
     def test_environment_context_includes_step_budget(self):
@@ -2209,3 +2212,276 @@ class TestBlastRateLimiting:
         mock_sleep.assert_called_once()
         sleep_duration = mock_sleep.call_args[0][0]
         assert 0 < sleep_duration <= 1.0 / 3.0
+
+
+# ---------------------------------------------------------------------------
+# _progress_footer  (BT-3)
+# ---------------------------------------------------------------------------
+
+class TestProgressFooter:
+    """BT-3: wall-clock elapsed time appears in footer and drives urgency text."""
+
+    def test_basic_footer_no_time(self):
+        footer = _progress_footer(10, 100, 5000)
+        assert "step 10/100" in footer
+        assert "90 steps remaining" in footer
+        assert "~5k tokens" in footer
+        assert "elapsed" not in footer
+
+    def test_elapsed_time_appears_in_footer(self):
+        footer = _progress_footer(10, 100, 5000, elapsed_seconds=900.0, run_timeout_seconds=3600)
+        assert "elapsed 900s/3600s" in footer
+
+    def test_step_warning_at_75_pct(self):
+        footer = _progress_footer(75, 100, 5000, elapsed_seconds=100.0, run_timeout_seconds=3600)
+        assert "WARNING" in footer
+        assert "25 steps remaining" in footer
+
+    def test_step_critical_at_90_pct(self):
+        footer = _progress_footer(90, 100, 5000, elapsed_seconds=100.0, run_timeout_seconds=3600)
+        assert "CRITICAL" in footer
+
+    def test_wall_clock_warning_at_75_pct(self):
+        # Steps at 50% but wall clock at 75% — wall clock should trigger warning
+        footer = _progress_footer(50, 100, 5000, elapsed_seconds=2700.0, run_timeout_seconds=3600)
+        assert "WARNING" in footer
+        assert "900s wall-clock remaining" in footer
+
+    def test_wall_clock_critical_at_90_pct(self):
+        footer = _progress_footer(50, 100, 5000, elapsed_seconds=3300.0, run_timeout_seconds=3600)
+        assert "CRITICAL" in footer
+
+    def test_no_urgency_below_75_pct(self):
+        footer = _progress_footer(50, 100, 5000, elapsed_seconds=1000.0, run_timeout_seconds=3600)
+        assert "WARNING" not in footer
+        assert "CRITICAL" not in footer
+
+    def test_blast_hint_in_wall_clock_warning(self):
+        footer = _progress_footer(50, 100, 5000, elapsed_seconds=2800.0, run_timeout_seconds=3600)
+        assert "BLAST" in footer
+
+
+# ---------------------------------------------------------------------------
+# BT-1: blast query size cap
+# ---------------------------------------------------------------------------
+
+class TestBlastQuerySizeCap:
+    """BT-1: blast_search refuses remote queries larger than blast_max_query_bp."""
+
+    def _make_blast_run_with_size(self, query_bp: int, max_bp: int = 1500):
+        """Build an AgentRun that issues one blast_search call; container reports query_bp bases."""
+        from harness.llm import LLMResponse, LLMUsage, LLMToolCall
+        from harness.config import RunConfig
+
+        tc = LLMToolCall(
+            id="tu_bt1",
+            name="blast_search",
+            input={
+                "query": "/workspace/scratch/big_query.fasta",
+                "database": "nt",
+                "program": "blastn",
+                "max_hits": 5,
+            },
+        )
+        responses = [
+            LLMResponse(
+                stop_reason="tool_use",
+                text="",
+                tool_calls=[tc],
+                usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+                raw_content=[{"type": "tool_use", "id": "tu_bt1", "name": "blast_search",
+                              "input": tc.input}],
+            ),
+            LLMResponse(
+                stop_reason="end_turn",
+                text="FINAL ANSWER: unknown",
+                tool_calls=[],
+                usage=LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0),
+                raw_content=[],
+            ),
+        ]
+        client = MagicMock()
+        client.chat.side_effect = responses
+
+        def exec_side_effect(command, timeout=300):
+            if "-version" in command:
+                return ("blastn: 2.16.0\n", "", 0)
+            if "awk" in command and "NF" in command:
+                # size-check command — return the mocked bp count
+                return (f"{query_bp}\n", "", 0)
+            # should not reach the actual blast call
+            return ("", "", 0)
+
+        container = MagicMock()
+        container.exec_command.side_effect = exec_side_effect
+
+        config = RunConfig(
+            max_steps=10,
+            step_timeout_seconds=30,
+            run_timeout_seconds=60,
+            blast_max_query_bp=max_bp,
+        )
+        run = AgentRun(
+            client=client,
+            container=container,
+            problem_question="q",
+            system_prompt="s",
+            config=config,
+            logger=MagicMock(),
+            cost_tracker=MagicMock(),
+        )
+        return run, container
+
+    def test_oversized_query_refused_without_blast_call(self):
+        run, container = self._make_blast_run_with_size(query_bp=2000, max_bp=1500)
+        run.run()
+        calls = [str(c) for c in container.exec_command.call_args_list]
+        # The actual blastn command should never have been called
+        assert not any("blastn -db" in c for c in calls)
+
+    def test_oversized_query_logs_size_error(self):
+        run, _ = self._make_blast_run_with_size(query_bp=2000, max_bp=1500)
+        run.run()
+        log_calls = run.logger.log.call_args_list
+        summaries = [str(c) for c in log_calls]
+        assert any("Query too large" in s or "size-check" in s for s in summaries)
+
+    def test_within_limit_proceeds_to_blast(self):
+        run, container = self._make_blast_run_with_size(query_bp=400, max_bp=1500)
+        run.run()
+        calls = [str(c) for c in container.exec_command.call_args_list]
+        assert any("blastn -db" in c for c in calls)
+
+    def test_zero_limit_disables_check(self):
+        """blast_max_query_bp=0 disables the pre-check entirely."""
+        run, container = self._make_blast_run_with_size(query_bp=9999, max_bp=0)
+        run.run()
+        calls = [str(c) for c in container.exec_command.call_args_list]
+        assert any("blastn -db" in c for c in calls)
+
+
+# ---------------------------------------------------------------------------
+# RV-2: LLMResponse.reasoning field populated from msg.reasoning
+# ---------------------------------------------------------------------------
+
+class TestOpenAIResponseReasoning:
+    """RV-2: openai_response_to_llm_response reads msg.reasoning into LLMResponse.reasoning."""
+
+    def _make_oai_response(self, content=None, reasoning=None, finish_reason="stop"):
+        msg = MagicMock()
+        msg.content = content
+        msg.tool_calls = []
+        if reasoning is not None:
+            msg.reasoning = reasoning
+        else:
+            del msg.reasoning  # ensure getattr returns None
+        choice = MagicMock()
+        choice.finish_reason = finish_reason
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        usage = MagicMock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 5
+        usage.prompt_tokens_details = None
+        resp.usage = usage
+        return resp
+
+    def test_reasoning_field_populated_from_msg_reasoning(self):
+        resp = self._make_oai_response(content="answer", reasoning="I reasoned step by step")
+        result = openai_response_to_llm_response(resp)
+        assert result.reasoning == "I reasoned step by step"
+
+    def test_reasoning_field_empty_when_msg_has_no_reasoning(self):
+        resp = self._make_oai_response(content="answer")
+        result = openai_response_to_llm_response(resp)
+        assert result.reasoning == ""
+
+    def test_reasoning_field_defaults_to_empty_on_llm_response(self):
+        from harness.llm import LLMUsage
+        r = LLMResponse(stop_reason="end_turn", text="hi", usage=LLMUsage())
+        assert r.reasoning == ""
+
+    def test_reasoning_does_not_affect_text_field(self):
+        resp = self._make_oai_response(content="final answer", reasoning="CoT goes here")
+        result = openai_response_to_llm_response(resp)
+        assert result.text == "final answer"
+        assert result.reasoning == "CoT goes here"
+
+
+# ---------------------------------------------------------------------------
+# RV-3: trajectory_to_md rendering fixes
+# ---------------------------------------------------------------------------
+
+class TestTrajectoryToMd:
+    """RV-3: trajectory_to_md renders reasoning <details>, blast_command, and summary correctly."""
+
+    def _convert(self, events: list[dict]) -> str:
+        import json
+        import tempfile
+        from pathlib import Path
+        from scripts.trajectory_to_md import convert
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".jsonl", delete=False, prefix="problem-hb000_attempt-0"
+        ) as f:
+            for ev in events:
+                f.write(json.dumps(ev) + "\n")
+            tmp = Path(f.name)
+        try:
+            return convert(tmp)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    def test_reasoning_field_rendered_as_details_block(self):
+        events = [
+            {"role": "assistant", "step": 1, "elapsed_seconds": 5.0,
+             "data": {"reasoning": "I need to check the genome size first.", "content": []}},
+        ]
+        md = self._convert(events)
+        assert "<details>" in md
+        assert "Reasoning" in md
+        assert "I need to check the genome size first." in md
+
+    def test_narration_text_rendered_without_details(self):
+        events = [
+            {"role": "assistant", "step": 1, "elapsed_seconds": 3.0,
+             "data": {"content": [{"type": "text", "text": "Let me explore the data."}]}},
+        ]
+        md = self._convert(events)
+        assert "Let me explore the data." in md
+        assert "<details>" not in md
+
+    def test_blast_command_renders_as_blast_label(self):
+        events = [
+            {"role": "tool_call", "step": 2, "elapsed_seconds": 1.0,
+             "data": {"blast_command": "blastn -db nt -remote -query /tmp/q.fa"}},
+        ]
+        md = self._convert(events)
+        assert "BLAST" in md
+        assert "blastn -db nt -remote" in md
+
+    def test_bash_command_renders_as_command_label(self):
+        events = [
+            {"role": "tool_call", "step": 2, "elapsed_seconds": 1.0,
+             "data": {"command": "ls /workspace/data/"}},
+        ]
+        md = self._convert(events)
+        assert "Command" in md
+        assert "ls /workspace/data/" in md
+
+    def test_blast_result_renders_summary_field(self):
+        events = [
+            {"role": "tool_result", "step": 3, "elapsed_seconds": 180.0,
+             "data": {"blast_command": "blastn ...", "summary": "Top hit: E.coli 98%", "returncode": 0}},
+        ]
+        md = self._convert(events)
+        assert "Top hit: E.coli 98%" in md
+
+    def test_bash_result_renders_stdout_field(self):
+        events = [
+            {"role": "tool_result", "step": 3, "elapsed_seconds": 2.0,
+             "data": {"command": "ls", "stdout": "genome.fasta\nreads.fastq", "returncode": 0}},
+        ]
+        md = self._convert(events)
+        assert "genome.fasta" in md
