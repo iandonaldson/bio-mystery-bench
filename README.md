@@ -534,3 +534,4 @@ To replicate Anthropic's published numbers you need the full 99-problem dataset 
 - [Code walkthrough: macOS VirtioFS EDEADLK fix — data files via overlay FS (IO-1)](documents/code_walkthroughs/14.io1_virtiofs_fix.md)
 - [Code walkthrough: BLAST plans improvement — rc diagnostics, sscinames, rate limiting (BP-1..5)](documents/code_walkthroughs/15.blast_plans_improvement.md)
 - [Code walkthrough: BLAST timeout remediation + gpt-oss-120b reasoning visibility (BT-1..4, RV-1..4)](documents/code_walkthroughs/16.bt4_rv4_blast_timeout_reasoning_visibility.md)
+- [Code walkthrough: BLAST timeout fallback guidance — qblast() + no-minimap2 rule (BT-5)](documents/code_walkthroughs/17.bt5_blast_timeout_fallback.md)

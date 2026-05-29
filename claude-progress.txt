@@ -1,7 +1,12 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-29 — hb002 re-validation run (3 attempts, gpt-oss-120b, Cerebras, reasoning_effort=high).
+2026-05-29 — BT-5: BLAST timeout fallback guidance (PR #91). Updated _BLAST_RC_MESSAGES[-1]
+to replace stale "use ≤1500 bp" with actionable qblast() / sleep-retry guidance. System prompt
+§3b appended: forbids minimap2 as species-ID substitute, directs to qblast() recipe. 2 new tests;
+190/190 in test_agent_helpers.py, 393/394 overall. Next slice: full 5×5 benchmark run.
+
+Previous: 2026-05-29 — hb002 re-validation run (3 attempts, gpt-oss-120b, Cerebras, reasoning_effort=high).
 Results: pass@1=0%, pass@3=100% (2/3 correct). Docker image rebuilt (SKILL hash mismatch).
 L-31 added to code-learnings; blast-search SKILL.md updated with efetch fallback guidance.
 
@@ -39,7 +44,7 @@ timeout fallback). blast-search SKILL.md updated with §8 (efetch for N/A) and �
 (timeout fallback, explicit anti-pattern: do NOT use minimap2).
 
 ## Active feature slice
-None — hb002 re-validation done. Next: close-session PR, then taxdb / CI guard / tool wrappers.
+None — BT-5 merged (PR #91). Next: full 5×5 benchmark run (hb002/hb022/hb053, 5 attempts each, gpt-oss-120b).
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
@@ -138,9 +143,16 @@ None — hb002 re-validation done. Next: close-session PR, then taxdb / CI guard
   JSONL trajectory logs reasoning when non-empty; trajectory_to_md.py fixes (blast_command/
   summary keys, reasoning <details> block); Harmony Reasoning: directive in system message.
   L-30 added. 10 new tests (TestOpenAIResponseReasoning × 4, TestTrajectoryToMd × 6).
+- BT-5: BLAST Timeout Fallback Guidance (PR #91, 2026-05-29)
+  _BLAST_RC_MESSAGES[-1] updated: "Network stall" + qblast() / sleep-retry guidance;
+  System prompt §3b new paragraph: no minimap2, try qblast() or sleep 290 + ≤150 bp retry.
+  2 new/updated tests (rc=-1 dispatch + system prompt qblast assertion). 190/190.
 
 ## Pending slices
 
+- **NEXT: Full 5×5 benchmark run** — hb002/hb022/hb053, 5 attempts each, gpt-oss-120b,
+  reasoning_effort=high, two-round critic. Compare to RERUN-6 baseline. Target directory:
+  results/gpt-oss-rerun7-5x5/.
 - taxdb in Dockerfile: prevents taxid hallucination in hb002-style problems (deferred)
 - Curated bioinformatics tool wrappers (DESeq2, STAR, featureCounts) — not yet started
 
@@ -157,18 +169,20 @@ Walkthroughs in documents/code_walkthroughs/:
 - 14.io1_virtiofs_fix.md — macOS VirtioFS EDEADLK fix (IO-1, PR #85)
 - 15.blast_plans_improvement.md — BLAST rc diagnostics, sscinames, rate limiting (BP-1..5)
 - 16.bt4_rv4_blast_timeout_reasoning_visibility.md — BLAST timeout remediation + gpt-oss-120b reasoning (BT-1..4, RV-1..4)
+- 17.bt5_blast_timeout_fallback.md — BLAST timeout fallback guidance: qblast(), no-minimap2 rule (BT-5, PR #91)
 
 ## Next steps (in priority order)
 1. ✅ Merge PR #89 (BT-1..4 + RV-1..4) — done (PR #90 close-session also merged).
 2. ✅ hb002 re-validation — done (results/gpt-oss-hb002-revalidation/, pass@3=100%).
-3. Close-session PR: features.md + progress + L-31 in code-learnings + blast-search SKILL.md §8-9.
-4. taxdb in Dockerfile: prevents taxid hallucination in hb002-style problems (user deferred).
-5. CI guard: AST-based test that asserts every `self.X` read in `AgentRun._loop` has a matching
+3. ✅ BT-5: BLAST timeout fallback guidance — done (PR #91 merged 2026-05-29).
+4. Full 5×5 benchmark run: hb002/hb022/hb053, 5 attempts each, gpt-oss-120b (see Pending slices).
+5. taxdb in Dockerfile: prevents taxid hallucination in hb002-style problems (user deferred).
+6. CI guard: AST-based test that asserts every `self.X` read in `AgentRun._loop` has a matching
    `self.X = …` initialiser in `AgentRun.__init__` (see L-21).
-6. Curated tool wrappers: DESeq2, STAR, featureCounts SKILL files + Docker integration.
-7. Full dataset (99 problems): requires HuggingFace approval + Azure VM setup
+7. Curated tool wrappers: DESeq2, STAR, featureCounts SKILL files + Docker integration.
+8. Full dataset (99 problems): requires HuggingFace approval + Azure VM setup
    (see documents/scaling_with_azure.md).
-8. Groq Dev Tier upgrade: unavailable since ~Apr 2026, no ETA.
+9. Groq Dev Tier upgrade: unavailable since ~Apr 2026, no ETA.
 
 ## Blockers / open questions for human
 - taxdb: user deferred ("Not yet") — confirm before implementing.
@@ -177,30 +191,34 @@ Walkthroughs in documents/code_walkthroughs/:
 - Azure VM setup (if needed for full benchmark) is user action.
 
 ## Test status
-189/189 passing in tests/test_agent_helpers.py (BT-1..4 + RV-1..4, PR #89).
-392/393 passing overall (1 pre-existing failure in
+190/190 passing in tests/test_agent_helpers.py (BT-5, PR #91).
+393/394 passing overall (1 pre-existing failure in
 test_analyze_trajectories::TestFindDataCache::test_returns_none_when_missing).
 
-New tests added (BT-1..4 + RV-1..4, PR #89):
-- 8 tests: TestProgressFooter (basic, elapsed, step-warning, step-critical, wall-clock-warning,
-  wall-clock-critical, no urgency below 75%, BLAST hint)
-- 4 tests: TestBlastQuerySizeCap (refused, logs error, within limit proceeds, zero disables)
-- 4 tests: TestOpenAIResponseReasoning (field populated, empty when absent, defaults, no effect on text)
-- 6 tests: TestTrajectoryToMd (reasoning details, narration only, blast label, command label,
-  blast summary key, bash stdout key)
+New tests added (BT-5, PR #91):
+- Updated: TestSummarizeBlastOutputRcDispatch::test_rc_negative_one_timeout (asserts "Network stall"
+  + "NCBIWWW.qblast" instead of stale "Timed out")
+- New: TestSystemPromptMethodAdvice::test_system_prompt_blast_timeout_fallback_mentions_qblast
 
 ## Notes for next agent session
-- IMMEDIATE TASK: open close-session PR for this session (hb002 re-validation + L-31 + blast-search SKILL).
-  Use the `session-close` skill. Branch: close-hb002-revalidation.
-- hb002 re-validation results: results/gpt-oss-hb002-revalidation/. pass@3=100%, pass@1=0%.
-  Attempt 0 failed because remote BLAST timed out, model fell back to minimap2 → E. coli.
-  See L-31 in code-learnings for the correct fallback pattern.
-- blast-search SKILL.md now has §8 (efetch for N/A species) and §9 (timeout fallback / anti-minimap2).
-  This SKILL change must be included in the next Docker rebuild (--rebuild flag or hash mismatch auto-detect).
+- IMMEDIATE TASK: full 5×5 benchmark run — hb002/hb022/hb053, 5 attempts each, gpt-oss-120b,
+  reasoning_effort=high, two-round critic. Results dir: results/gpt-oss-rerun7-5x5/.
+  Command (set -a; source .env; set +a first):
+    echo "y" | python3.12 scripts/run_eval.py \
+      --problems hb002 hb022 hb053 \
+      --attempts 5 \
+      --provider openai \
+      --model gpt-oss-120b \
+      --api-base-url https://api.cerebras.ai/v1 \
+      --reasoning-effort high \
+      --critic-injection-points after_final_answer \
+      --critic-injection-points after_critic_response \
+      --results-dir results/gpt-oss-rerun7-5x5
 - Cerebras model: gpt-oss-120b (default). qwen-3-235b-a22b-instruct-2507 deprecated 2026-05-27.
-  Use --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key $CEREBRAS_API_KEY
-- Provider flags: --provider anthropic|openai|ollama|groq, --api-base-url, --api-key, --judge-model
+- Provider flags: --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key $CEREBRAS_API_KEY
 - Two-round critic: --critic-injection-points after_final_answer --critic-injection-points after_critic_response
+- BT-5 (PR #91): rc=-1 message now says "Network stall" + qblast() fallback. System prompt §3b
+  added: no minimap2, try qblast() or sleep 290 + ≤150 bp retry.
 - /workspace/skills/ has 5 files: deg-functional-enrichment.md, chipseq-tf-identification.md,
   genome-retrieval.md, ucsc-sequence-fetch.md, blast-search.md
 - All fixes in PRs #1–#90 merged to main.
