@@ -960,3 +960,45 @@ rc=-1 message to point to `qblast()` and removed the efetch suggestion from both
 error message and the system prompt (efetch will get its own SKILL file later).
 
 **Cross-reference:** §L-31 (do NOT use minimap2 for species identification).
+
+---
+
+## L-33: RERUN-7 (gpt-oss-120b, 5×5) — BLAST fixes vindicated; hb022 model-level bias
+
+**Lesson (2026-05-29 — RERUN-7, results/gpt-oss-rerun7-5x5/):**
+
+Full 5×5 benchmark (hb002/hb022/hb053, 5 attempts each, gpt-oss-120b,
+`reasoning_effort=high`, two-round critic) completed.
+
+**Results vs RERUN-6 (Qwen3/Cerebras) baseline:**
+
+| Problem | RERUN-6 | RERUN-7 | Change |
+|---------|---------|---------|--------|
+| hb002   | 0/5     | 5/5     | +5 (BLAST fixes working) |
+| hb022   | 3/5     | 0/5     | −3 (model-level bias, see below) |
+| hb053   | 0/5     | 0/5     | unchanged |
+
+pass@1=33.3%, pass@5=33.3%, total cost=$12.65.
+
+**hb002 (human_solvable=True):** Perfect 5/5. The BT-1..5 fixes (BLAST timeout remediation,
+qblast fallback, no-minimap2 rule) fully eliminated the BLAST failure mode that caused 0/5
+in RERUN-6. Attempt times ranged 136–803 s (2–13 min); BLAST is completing within the
+per-command timeout.
+
+**hb022 (human_NOT_solvable=False) — systematic wrong-half bias in gpt-oss-120b:**
+All 5 attempts predicted [Sample_09–16]; correct answer is [Sample_01–08]. The agent
+correctly clusters the 16 samples into two groups but assigns the wrong cluster as
+"Erastin-treated." The bias stems from how the model interprets SLC7A11 expression
+direction: it assumes SLC7A11 should be *higher* in Erastin-treated cells (compensatory
+upregulation hypothesis), but Sample_01–08 actually have *lower* SLC7A11-AS1 expression
+(≈ −0.3 to −1.9), which is the correct Erastin signature. Sample_09–16 have higher
+SLC7A11 expression (~+0.3 to +0.6) and are the control group. RERUN-6/Qwen3 got 3/5
+correct, suggesting this is a model-level knowledge difference, not a harness issue.
+Since hb022 is "human_NOT_solvable", no harness fix is warranted.
+
+**hb053 (human_NOT_solvable=False):** Agent BLASTs the scrubbed FASTA sequences, identifies
+gene functions, but consistently assigns wrong stress types (pathogen, drought, phosphate
+starvation). Correct answer is "heat stress". Step counts high (26–91 steps per attempt).
+Consistent failure across 5 attempts with different wrong answers suggests the agent is
+finding some genes enriched for other stress responses and failing to weight HSP/heat-stress
+markers correctly. No harness fix is warranted; this is a knowledge/reasoning limitation.

@@ -1,10 +1,10 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-29 — BT-5: BLAST timeout fallback guidance (PR #91). Updated _BLAST_RC_MESSAGES[-1]
-to replace stale "use ≤1500 bp" with actionable qblast() / sleep-retry guidance. System prompt
-§3b appended: forbids minimap2 as species-ID substitute, directs to qblast() recipe. 2 new tests;
-190/190 in test_agent_helpers.py, 393/394 overall. Next slice: full 5×5 benchmark run.
+2026-05-29 — RERUN-7: Full 5×5 benchmark run (hb002/hb022/hb053, gpt-oss-120b,
+reasoning_effort=high, two-round critic). Results in results/gpt-oss-rerun7-5x5/.
+hb002: 5/5 CORRECT (BLAST fixes vindicated). hb022: 0/5 (model-level wrong-half bias).
+hb053: 0/5 (heat stress not identified). pass@1=33.3%, pass@5=33.3%, $12.65 total.
 
 Previous: 2026-05-29 — hb002 re-validation run (3 attempts, gpt-oss-120b, Cerebras, reasoning_effort=high).
 Results: pass@1=0%, pass@3=100% (2/3 correct). Docker image rebuilt (SKILL hash mismatch).
@@ -26,25 +26,36 @@ VirtioFS EDEADLK bug; fixed by replacing data_dir bind mount with put_archive. 4
 352/353 tests passing. Walkthrough 14 written.
 
 ## Current status
-hb002 re-validation complete (results/gpt-oss-hb002-revalidation/). Results:
-  Attempt 0: 67 steps, 3210s, WRONG (Escherichia coli)
-  Attempt 1: 11 steps, 322s, CORRECT (Bacillus licheniformis)
-  Attempt 2: 27 steps, 2539s, CORRECT (Bacillus licheniformis)
-  pass@1=0%, pass@3=100%, brittle=True, total_cost=$2.72
+RERUN-7 complete (results/gpt-oss-rerun7-5x5/). gpt-oss-120b, reasoning_effort=high, two-round critic.
 
-Reasoning visibility (RV-1..4) confirmed working: 11 of 34 JSONL records contain
-"reasoning" text; Markdown trajectories have <details> blocks with CoT visible.
+  hb002 (human_solvable=True):  5/5 CORRECT — pass@1=100%, pass@5=100%
+    Predicted: Bacillus licheniformis (all 5 attempts)
+    Steps: 9–25 per attempt; times: 136–803s; total cost $0.92
+    Note: BLAST timeout fixes (BT-1..5) fully eliminated RERUN-6 BLAST failures.
 
-Attempt 0 failure analysis: remote BLAST timed out twice (474 bp at 101s, 150 bp at 741s),
-both hitting the 600s per-command wall due to NCBI server load at that time. After two
-timeouts, the model fell back to downloading E. coli genome, running minimap2, and
-misidentifying from partial alignment. L-31 documents this pattern and the correct
-fallback (NCBI efetch for N/A species accessions; Bio.Blast.NCBIWWW.qblast() for
-timeout fallback). blast-search SKILL.md updated with §8 (efetch for N/A) and §9
-(timeout fallback, explicit anti-pattern: do NOT use minimap2).
+  hb022 (human_solvable=False): 0/5 WRONG — pass@1=0%, pass@5=0%
+    Predicted: [Sample_09–16] (all 5 attempts)
+    Correct: [Sample_01–08]
+    Analysis: Agent clusters 16 samples correctly but assigns wrong cluster as
+    Erastin-treated. SLC7A11-AS1 is LOWER in Sample_01–08 (correct Erastin group);
+    model wrongly expects it to be HIGHER. Model-level knowledge bias, not harness.
+    RERUN-6/Qwen3 got 3/5 — suggests gpt-oss-120b has different Erastin prior.
+
+  hb053 (human_solvable=False): 0/5 WRONG — pass@1=0%, pass@5=0%
+    Predicted: pathogen/drought/phosphate (various); Correct: heat stress
+    Steps: 26–91 per attempt; times: 1085–2835s; total cost $11.84
+    Analysis: Agent BLASTs scrubbed DEG sequences, identifies gene functions, but
+    fails to weight HSP/heat-stress markers. Varied wrong answers across attempts.
+
+Overall: pass@1=33.3%, pass@5=33.3%, brittle=0%, total_cost=$12.65
+
+Comparison with RERUN-6 (Qwen3/Cerebras):
+  hb002: 0/5 → 5/5 (+5, BLAST fixes)
+  hb022: 3/5 → 0/5 (−3, model-level regression)
+  hb053: 0/5 → 0/5 (unchanged)
 
 ## Active feature slice
-None — BT-5 merged (PR #91). Next: full 5×5 benchmark run (hb002/hb022/hb053, 5 attempts each, gpt-oss-120b).
+None — RERUN-7 complete. Next: close-session docs PR, then investigate hb022/hb053 failure modes or move to taxdb/next slice.
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
@@ -150,9 +161,7 @@ None — BT-5 merged (PR #91). Next: full 5×5 benchmark run (hb002/hb022/hb053,
 
 ## Pending slices
 
-- **NEXT: Full 5×5 benchmark run** — hb002/hb022/hb053, 5 attempts each, gpt-oss-120b,
-  reasoning_effort=high, two-round critic. Compare to RERUN-6 baseline. Target directory:
-  results/gpt-oss-rerun7-5x5/.
+- ✅ RERUN-7: Full 5×5 benchmark run (results/gpt-oss-rerun7-5x5/, 2026-05-29)
 - taxdb in Dockerfile: prevents taxid hallucination in hb002-style problems (deferred)
 - Curated bioinformatics tool wrappers (DESeq2, STAR, featureCounts) — not yet started
 
@@ -191,34 +200,33 @@ Walkthroughs in documents/code_walkthroughs/:
 - Azure VM setup (if needed for full benchmark) is user action.
 
 ## Test status
-190/190 passing in tests/test_agent_helpers.py (BT-5, PR #91).
+190/190 passing in tests/test_agent_helpers.py.
 393/394 passing overall (1 pre-existing failure in
 test_analyze_trajectories::TestFindDataCache::test_returns_none_when_missing).
-
-New tests added (BT-5, PR #91):
-- Updated: TestSummarizeBlastOutputRcDispatch::test_rc_negative_one_timeout (asserts "Network stall"
-  + "NCBIWWW.qblast" instead of stale "Timed out")
-- New: TestSystemPromptMethodAdvice::test_system_prompt_blast_timeout_fallback_mentions_qblast
+No new tests in RERUN-7 (benchmark run, not code change).
 
 ## Notes for next agent session
-- IMMEDIATE TASK: full 5×5 benchmark run — hb002/hb022/hb053, 5 attempts each, gpt-oss-120b,
-  reasoning_effort=high, two-round critic. Results dir: results/gpt-oss-rerun7-5x5/.
-  Command (set -a; source .env; set +a first):
-    echo "y" | python3.12 scripts/run_eval.py \
-      --problems hb002 hb022 hb053 \
-      --attempts 5 \
+- RERUN-7 complete (2026-05-29). Results in results/gpt-oss-rerun7-5x5/.
+  hb002: 5/5 (BLAST fixes working). hb022: 0/5 (gpt-oss-120b wrong-half bias).
+  hb053: 0/5 (various wrong stress types; heat stress not identified).
+- Cerebras run command (corrected flags for future runs):
+    set -a && source .env && set +a && echo "y" | python3.12 scripts/run_eval.py \
+      --problem-ids hb002,hb022,hb053 \
+      --n-attempts 5 \
       --provider openai \
       --model gpt-oss-120b \
       --api-base-url https://api.cerebras.ai/v1 \
+      --api-key "$CEREBRAS_API_KEY" \
       --reasoning-effort high \
       --critic-injection-points after_final_answer \
       --critic-injection-points after_critic_response \
-      --results-dir results/gpt-oss-rerun7-5x5
-- Cerebras model: gpt-oss-120b (default). qwen-3-235b-a22b-instruct-2507 deprecated 2026-05-27.
-- Provider flags: --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key $CEREBRAS_API_KEY
-- Two-round critic: --critic-injection-points after_final_answer --critic-injection-points after_critic_response
-- BT-5 (PR #91): rc=-1 message now says "Network stall" + qblast() fallback. System prompt §3b
-  added: no minimap2, try qblast() or sleep 290 + ≤150 bp retry.
+      --results-dir results/<output-dir>
+  Note: flags are --problem-ids (comma-separated, NOT space-separated) and --n-attempts.
 - /workspace/skills/ has 5 files: deg-functional-enrichment.md, chipseq-tf-identification.md,
   genome-retrieval.md, ucsc-sequence-fetch.md, blast-search.md
-- All fixes in PRs #1–#90 merged to main.
+- All fixes in PRs #1–#92 merged to main.
+- Next actions (in priority):
+  1. Close-session docs PR for RERUN-7 (features.md + progress + L-33 + walkthrough 18)
+  2. Investigate hb022 failure: can harness guidance correct gpt-oss-120b SLC7A11 direction?
+  3. taxdb in Dockerfile (deferred by user)
+  4. Curated tool wrappers: DESeq2, STAR, featureCounts

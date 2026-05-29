@@ -996,3 +996,31 @@ Key distinction between two failure modes that must not be conflated:
 
 **New tests:** 2 (1 updated `test_rc_negative_one_timeout`, 1 new `test_system_prompt_blast_timeout_fallback_mentions_qblast`).
 Test count after merge: 190/190 passing in `tests/test_agent_helpers.py`; 393/394 overall.
+
+---
+
+## ✅ RERUN-7: Full 5×5 Benchmark Run (2026-05-29)
+
+**Goal:** Full benchmark with gpt-oss-120b (Cerebras), `reasoning_effort=high`, two-round
+critic, across all three preview problems × 5 attempts. Compare to RERUN-6 (Qwen3) baseline.
+
+**Results (results/gpt-oss-rerun7-5x5/):**
+
+| Problem | RERUN-6 (Qwen3) | RERUN-7 (gpt-oss-120b) | Analysis |
+|---------|-----------------|------------------------|----------|
+| hb002   | 0/5             | **5/5** ✅             | BLAST fixes (BT-1..5) fully eliminated timeout failures |
+| hb022   | 3/5             | 0/5 ❌                 | Model-level bias: picks wrong condition (Sample_09–16 vs correct Sample_01–08) |
+| hb053   | 0/5             | 0/5 ❌                 | Heat stress not identified; various wrong answers (pathogen/drought/phosphate) |
+
+Overall: pass@1=33.3%, pass@5=33.3%, brittle=0%, total_cost=$12.65.
+
+**hb022 failure analysis:** gpt-oss-120b consistently picks [Sample_09–16] (wrong). Correct
+answer is [Sample_01–08]. Agent correctly clusters samples into two groups but wrongly assigns
+SLC7A11 direction — assumes SLC7A11 should be *higher* in Erastin-treated cells; actual data shows
+it lower in the Erastin group. This is a model-level prior, not a harness bug. (hb022 is human_NOT_solvable.)
+
+**hb053 failure analysis:** Agent BLASTs scrubbed DEG FASTA sequences and identifies gene functions
+but fails to converge on heat stress. Varied wrong answers across 5 attempts. Step counts high (26–91);
+some attempts near the 100-step limit. (hb053 is human_NOT_solvable.)
+
+**L-33** added to code-learnings with full RERUN-7 results and failure analyses.
