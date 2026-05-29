@@ -964,3 +964,35 @@ is the native-format equivalent and is added as belt-and-suspenders (RV-4).
 
 **New tests:** 10 (`TestOpenAIResponseReasoning` × 4, `TestTrajectoryToMd` × 6).
 Test count after merge: 189/189 passing in `tests/test_agent_helpers.py`; 392/393 overall.
+
+---
+
+## ✅ BT-5: BLAST Timeout Fallback Guidance (PR #91, 2026-05-29)
+
+### Background
+
+The hb002 re-validation attempt 0 (2026-05-29) failed despite BT-1..4 being in place.
+Remote BLAST timed out twice — once on a 474 bp query and once on a 150 bp retry — because
+of NCBI server load at that time (not query size). After two rc=-1 returns, the agent
+read the rc=-1 message ("Use ≤1500 bp for remote BLAST") and the system prompt §3a
+("retry or switch to a local approach"), and switched to downloading the E. coli genome
+and running minimap2. The `_BLAST_RC_MESSAGES[-1]` entry still contained the pre-BT-1
+advice ("Use ≤1500 bp") — stale after BT-1 enforced that cap at dispatch time. Neither
+message told the agent what to do when NCBI was stalling on already-short queries.
+
+Key distinction between two failure modes that must not be conflated:
+- **rc=0, Species=N/A**: BLAST found hits but `sscinames` is absent for the accession.
+  Recovery: use the accession ID and `curl efetch` to get the GenBank organism name.
+- **rc=-1**: BLAST timed out — no hits, no accession. Recovery: try
+  `Bio.Blast.NCBIWWW.qblast()` (different HTTP timeout path) or wait and retry with
+  ≤150 bp. `curl efetch` is wrong here — there is no accession to look up.
+
+| ID | Scope | Test |
+|----|-------|------|
+| BT-5a | Update `_BLAST_RC_MESSAGES[-1]` in `harness/agent.py`. Replace stale "Use ≤1500 bp for remote BLAST" (irrelevant after BT-1 enforces the cap at dispatch) with: "Network stall (query was already ≤1500 bp — size is not the issue). Check `/workspace/scratch/blast_results.txt` for partial hits. If none: try `Bio.Blast.NCBIWWW.qblast()` in Python, or `sleep 290` then retry with ≤150 bp. Do not switch to minimap2." Updated `TestSummarizeBlastOutputRcDispatch::test_rc_negative_one_timeout` to assert "Network stall" + "NCBIWWW.qblast". | `TestSummarizeBlastOutputRcDispatch::test_rc_negative_one_timeout` (updated) |
+| BT-5b | Append timeout-fallback paragraph to §3b in `prompts/system.txt`. Explicitly forbids minimap2 as species-ID substitute. Directs agent to `qblast()` recipe in `blast-search.md §9`, or `sleep 290` + ≤150 bp retry. `efetch` intentionally omitted — problem-specific for N/A species lookups, not a general timeout fallback. | `TestSystemPromptMethodAdvice::test_system_prompt_blast_timeout_fallback_mentions_qblast` (new) |
+
+**Files:** `harness/agent.py`, `prompts/system.txt`, `tests/test_agent_helpers.py`
+
+**New tests:** 2 (1 updated `test_rc_negative_one_timeout`, 1 new `test_system_prompt_blast_timeout_fallback_mentions_qblast`).
+Test count after merge: 190/190 passing in `tests/test_agent_helpers.py`; 393/394 overall.

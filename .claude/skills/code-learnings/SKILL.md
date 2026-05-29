@@ -931,3 +931,32 @@ first timeout.
 
 **Cross-reference:** §L-26 (bash pipeline exit codes silently swallowed) — both arise
 from misinterpreting tool output.
+
+---
+
+## L-32: Distinguish "BLAST hit with N/A species" from "BLAST timeout" — they require different fallbacks
+
+**Lesson (2026-05-29 — BT-5, PR #91):** Two BLAST failure modes are easy to conflate
+in guidance text but require completely different recovery paths:
+
+1. **rc=0, Species = N/A**: BLAST ran, found hits, and returned accession IDs — but the
+   `sscinames` NCBI column is absent for newer assemblies. Recovery: read the accession
+   from `/workspace/scratch/blast_results.txt` and run `curl efetch` to fetch the
+   GenBank record's `SOURCE: ORGANISM` line. This works because a successful hit exists.
+
+2. **rc=-1, no results**: BLAST network stalled — no hits, no accession IDs returned.
+   Recovery: try `Bio.Blast.NCBIWWW.qblast()` (the Python NCBI BLAST API, which uses
+   a different HTTP timeout path than the `-remote` flag) or `sleep 290` and retry with
+   a ≤150 bp query. `curl efetch` is useless here — there is no accession to look up.
+
+**Rule:** Never propose `curl efetch` as a fallback for rc=-1 timeouts. Efetch requires
+a BLAST-returned accession ID, which only exists after a successful (rc=0) BLAST call.
+`Bio.Blast.NCBIWWW.qblast()` is the correct timeout fallback.
+
+**Root cause of the confusion in BT-5:** The hb002 revalidation attempt-0 failure was
+documented in §L-31 as "use efetch". That guidance correctly applies to the N/A-species
+case but was written into the rc=-1 message — the wrong failure mode. BT-5 fixed the
+rc=-1 message to point to `qblast()` and removed the efetch suggestion from both the
+error message and the system prompt (efetch will get its own SKILL file later).
+
+**Cross-reference:** §L-31 (do NOT use minimap2 for species identification).
