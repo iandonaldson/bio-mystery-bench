@@ -1,9 +1,13 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-28 — Close-session for BT-1..4 (BLAST timeout remediation) and RV-1..4 (reasoning
-visibility for gpt-oss-120b). PR #89 merged; close-session PR #90 open for docs.
-22 new tests; 189/189 pass in test_agent_helpers.py; 392/393 overall. Walkthrough 16 written.
+2026-05-29 — hb002 re-validation run (3 attempts, gpt-oss-120b, Cerebras, reasoning_effort=high).
+Results: pass@1=0%, pass@3=100% (2/3 correct). Docker image rebuilt (SKILL hash mismatch).
+L-31 added to code-learnings; blast-search SKILL.md updated with efetch fallback guidance.
+
+Previous: 2026-05-28 — Close-session for BT-1..4 (BLAST timeout remediation) and RV-1..4 (reasoning
+visibility for gpt-oss-120b). PR #89 merged; close-session PR #90 merged. 22 new tests;
+189/189 pass in test_agent_helpers.py; 392/393 overall. Walkthrough 16 written.
 
 Previous: 2026-05-28 — Model choice: gpt-oss-120b confirmed as new default Cerebras model after
 qwen-3-235b-a22b-instruct-2507 was fully deprecated by Cerebras on 2026-05-27. README
@@ -17,15 +21,25 @@ VirtioFS EDEADLK bug; fixed by replacing data_dir bind mount with put_archive. 4
 352/353 tests passing. Walkthrough 14 written.
 
 ## Current status
-BT-1..4 and RV-1..4 merged (PR #89). BT-1..4: BLAST query-size cap (harness refuses queries
->1500 bp immediately), wall-clock progress in step footer, corrected system prompt (60-minute
-limit), blast-search SKILL.md rewrite (start with ≤500 bp). RV-1..4: reasoning_effort="high"
-API param, msg.reasoning read from Cerebras responses, JSONL trajectory logging of CoT,
-trajectory_to_md.py fixes (blast_command/summary keys + reasoning <details> block), Harmony
-Reasoning: directive in system message. Close-session docs in PR #90.
+hb002 re-validation complete (results/gpt-oss-hb002-revalidation/). Results:
+  Attempt 0: 67 steps, 3210s, WRONG (Escherichia coli)
+  Attempt 1: 11 steps, 322s, CORRECT (Bacillus licheniformis)
+  Attempt 2: 27 steps, 2539s, CORRECT (Bacillus licheniformis)
+  pass@1=0%, pass@3=100%, brittle=True, total_cost=$2.72
+
+Reasoning visibility (RV-1..4) confirmed working: 11 of 34 JSONL records contain
+"reasoning" text; Markdown trajectories have <details> blocks with CoT visible.
+
+Attempt 0 failure analysis: remote BLAST timed out twice (474 bp at 101s, 150 bp at 741s),
+both hitting the 600s per-command wall due to NCBI server load at that time. After two
+timeouts, the model fell back to downloading E. coli genome, running minimap2, and
+misidentifying from partial alignment. L-31 documents this pattern and the correct
+fallback (NCBI efetch for N/A species accessions; Bio.Blast.NCBIWWW.qblast() for
+timeout fallback). blast-search SKILL.md updated with §8 (efetch for N/A) and §9
+(timeout fallback, explicit anti-pattern: do NOT use minimap2).
 
 ## Active feature slice
-None — BT-1..4 + RV-1..4 merged (PR #89). Next: hb002 re-validation (3 attempts, fresh results dir).
+None — hb002 re-validation done. Next: close-session PR, then taxdb / CI guard / tool wrappers.
 
 ## Completed slices
 - Docker sandbox image (bioinformatics tools, micromamba base)
@@ -127,20 +141,6 @@ None — BT-1..4 + RV-1..4 merged (PR #89). Next: hb002 re-validation (3 attempt
 
 ## Pending slices
 
-<<<<<<< HEAD
-- RV-1..4: Reasoning visibility for gpt-oss-120b — implemented 2026-05-28 (commit cf07149):
-  RV-1: reasoning_effort config field + API param + --reasoning-effort CLI flag
-  RV-2: Read msg.reasoning from Cerebras responses; LLMResponse.reasoning field; Anthropic thinking blocks
-  RV-3: JSONL trajectory logs reasoning when non-empty; trajectory_to_md.py fixes (blast_command, summary, <details>)
-  RV-4: Append "Reasoning: {effort}" to system message for OpenAI-compatible providers
-- BLAST Plans Improvement (BP-1 to BP-5) — implemented 2026-05-28, awaiting PR:
-  BP-1: rc-specific BLAST diagnostic messages (_BLAST_RC_MESSAGES in harness/agent.py)
-  BP-2: sscinames in outfmt (_BLAST_OUTFMT constant; species column in hit table)
-  BP-3: Remote BLAST rate limiting (≤3/s; self._last_blast_time in AgentRun)
-  BP-4: blast-search SKILL.md rewrite (query size, rc table, NCBI ref, 16S recipe removed)
-  BP-5: L-28 in code-learnings (no problem-specific SKILL content rule)
-=======
->>>>>>> efeb148 (docs: close bt4-rv4 — features/progress/learnings/walkthrough)
 - taxdb in Dockerfile: prevents taxid hallucination in hb002-style problems (deferred)
 - Curated bioinformatics tool wrappers (DESeq2, STAR, featureCounts) — not yet started
 
@@ -159,58 +159,28 @@ Walkthroughs in documents/code_walkthroughs/:
 - 16.bt4_rv4_blast_timeout_reasoning_visibility.md — BLAST timeout remediation + gpt-oss-120b reasoning (BT-1..4, RV-1..4)
 
 ## Next steps (in priority order)
-1. Merge PR #89 (BT-1..4 + RV-1..4 features), then merge close-session PR.
-2. hb002 re-validation run: run hb002 with 3 attempts in a FRESH results directory using
-   gpt-oss-120b with the new reasoning_effort=high flag. Check JSONL trajectory for
-   "reasoning" fields and Markdown trajectory for <details> reasoning blocks.
-     python scripts/run_eval.py \
-       --provider openai --model gpt-oss-120b \
-       --api-base-url https://api.cerebras.ai/v1 --api-key "$CEREBRAS_API_KEY" \
-       --results-dir results/gpt-oss-hb002-revalidation \
-       --problem-ids hb002 --n-attempts 3 \
-       --reasoning-effort high \
-       --critic-injection-points after_final_answer \
-       --critic-injection-points after_critic_response \
-       --max-critic-rounds 2
-3. taxdb in Dockerfile: prevents taxid hallucination in hb002-style problems.
-4. CI guard: AST-based test that asserts every `self.X` read in `AgentRun._loop` has a matching
+1. ✅ Merge PR #89 (BT-1..4 + RV-1..4) — done (PR #90 close-session also merged).
+2. ✅ hb002 re-validation — done (results/gpt-oss-hb002-revalidation/, pass@3=100%).
+3. Close-session PR: features.md + progress + L-31 in code-learnings + blast-search SKILL.md §8-9.
+4. taxdb in Dockerfile: prevents taxid hallucination in hb002-style problems (user deferred).
+5. CI guard: AST-based test that asserts every `self.X` read in `AgentRun._loop` has a matching
    `self.X = …` initialiser in `AgentRun.__init__` (see L-21).
-5. Curated tool wrappers: DESeq2, STAR, featureCounts SKILL files + Docker integration.
-6. Full dataset (99 problems): requires HuggingFace approval + Azure VM setup
+6. Curated tool wrappers: DESeq2, STAR, featureCounts SKILL files + Docker integration.
+7. Full dataset (99 problems): requires HuggingFace approval + Azure VM setup
    (see documents/scaling_with_azure.md).
-7. Groq Dev Tier upgrade: unavailable since ~Apr 2026, no ETA.
+8. Groq Dev Tier upgrade: unavailable since ~Apr 2026, no ETA.
 
 ## Blockers / open questions for human
-- PR #89 (BT-1..4 + RV-1..4) needs merge before hb002 re-validation.
 - taxdb: user deferred ("Not yet") — confirm before implementing.
 - Full 99-problem dataset requires HuggingFace approval.
 - Groq Dev Tier upgrades temporarily unavailable (since ~Apr 2026, no ETA).
 - Azure VM setup (if needed for full benchmark) is user action.
 
 ## Test status
-<<<<<<< HEAD
-189/189 passing in tests/test_agent_helpers.py (RV-1..4 changes, this session).
-392/393 passing overall on main (1 pre-existing failure in
-=======
-189/189 passing in tests/test_agent_helpers.py (BT-1..4 + RV-1..4 in PR #89).
+189/189 passing in tests/test_agent_helpers.py (BT-1..4 + RV-1..4, PR #89).
 392/393 passing overall (1 pre-existing failure in
->>>>>>> efeb148 (docs: close bt4-rv4 — features/progress/learnings/walkthrough)
 test_analyze_trajectories::TestFindDataCache::test_returns_none_when_missing).
-On close branch (origin/main, before PR #89): 370/371 passing.
 
-<<<<<<< HEAD
-New tests added this session (RV-1..4):
-- 4 tests: TestOpenAIResponseReasoning (reasoning field populated, empty when absent, no effect on text)
-- 6 tests: TestTrajectoryToMd (reasoning <details>, narration only, blast_command label, command label,
-  blast summary key, bash stdout key)
-
-## Notes for next agent session
-- IMMEDIATE TASK: run hb002 re-validation (3 attempts, gpt-oss-120b, Cerebras) with reasoning visible.
-  Use --reasoning-effort high (default) and check JSONL trajectory for "reasoning" fields.
-  Check Markdown trajectory for <details> reasoning blocks.
-  Full command in Next steps #1 above. Create results dir first: mkdir -p results/gpt-oss-hb002-validation
-- Cerebras model: DEFAULT IS NOW gpt-oss-120b (qwen-3-235b-a22b-instruct-2507 deprecated 2026-05-27).
-=======
 New tests added (BT-1..4 + RV-1..4, PR #89):
 - 8 tests: TestProgressFooter (basic, elapsed, step-warning, step-critical, wall-clock-warning,
   wall-clock-critical, no urgency below 75%, BLAST hint)
@@ -220,21 +190,17 @@ New tests added (BT-1..4 + RV-1..4, PR #89):
   blast summary key, bash stdout key)
 
 ## Notes for next agent session
-- IMMEDIATE TASK after PRs merge: hb002 re-validation (3 attempts, gpt-oss-120b, --reasoning-effort high).
-  Full command in Next steps #2 above. Fresh results dir: results/gpt-oss-hb002-revalidation/
-- PR #89 must be merged first — it contains the reasoning_effort flag and blast_max_query_bp cap.
-- Cerebras model: gpt-oss-120b (qwen-3-235b-a22b-instruct-2507 deprecated 2026-05-27).
->>>>>>> efeb148 (docs: close bt4-rv4 — features/progress/learnings/walkthrough)
-  use --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key $CEREBRAS_API_KEY
-- New in PR #89: --reasoning-effort high (default) sends reasoning_effort param to Cerebras API
-  AND appends "Reasoning: high" to system prompt (Harmony directive, belt-and-suspenders).
-- New in PR #89: blast_max_query_bp=1500 refuses full-genome BLAST immediately with rc=-1 message.
-  First BLAST call in trajectory should now show rc=-1 "Query too large" rather than 600s timeout.
-- trajectory_to_md.py fixed: blast_search calls now render as "BLAST" label with correct command;
-  blast results now show the summary text; reasoning field renders as <details> block.
+- IMMEDIATE TASK: open close-session PR for this session (hb002 re-validation + L-31 + blast-search SKILL).
+  Use the `session-close` skill. Branch: close-hb002-revalidation.
+- hb002 re-validation results: results/gpt-oss-hb002-revalidation/. pass@3=100%, pass@1=0%.
+  Attempt 0 failed because remote BLAST timed out, model fell back to minimap2 → E. coli.
+  See L-31 in code-learnings for the correct fallback pattern.
+- blast-search SKILL.md now has §8 (efetch for N/A species) and §9 (timeout fallback / anti-minimap2).
+  This SKILL change must be included in the next Docker rebuild (--rebuild flag or hash mismatch auto-detect).
+- Cerebras model: gpt-oss-120b (default). qwen-3-235b-a22b-instruct-2507 deprecated 2026-05-27.
+  Use --provider openai --api-base-url https://api.cerebras.ai/v1 --api-key $CEREBRAS_API_KEY
 - Provider flags: --provider anthropic|openai|ollama|groq, --api-base-url, --api-key, --judge-model
 - Two-round critic: --critic-injection-points after_final_answer --critic-injection-points after_critic_response
 - /workspace/skills/ has 5 files: deg-functional-enrichment.md, chipseq-tf-identification.md,
   genome-retrieval.md, ucsc-sequence-fetch.md, blast-search.md
-- blast-search SKILL.md (BT-4): opening now says "⚠ CRITICAL: Always start with ≤500 bp"
-- All fixes in PRs #1–#88 merged to main; PR #89 pending.
+- All fixes in PRs #1–#90 merged to main.

@@ -130,7 +130,15 @@ _BLAST_OUTFMT = (
 # BP-1: mapping from official BLAST+ exit codes to agent-readable diagnostics.
 # rc=0 with empty output is handled separately as "genuine no hits".
 _BLAST_RC_MESSAGES: dict[int, str] = {
-    -1:  "Timed out — query too large or network stall. Use ≤1500 bp for remote BLAST.",
+    -1:  (
+        "Network stall (query was already ≤1500 bp — size is not the issue). "
+        "Check /workspace/scratch/blast_results.txt for any partial hits. "
+        "If none: try Bio.Blast.NCBIWWW.qblast() in Python, "
+        "or sleep 290 (5 min) and retry with a ≤150 bp query. "
+        "Do not switch to alternative alignment tools (e.g. minimap2) until "
+        "a short BLAST query returns results. "
+        "See /workspace/skills/blast-search.md §9 for the qblast() recipe."
+    ),
     1:   "Invalid query or options — check FASTA format and flags.",
     2:   "Database error — NCBI nt/nr may be temporarily unavailable.",
     3:   "BLAST engine error — retry with shorter query.",

@@ -159,7 +159,45 @@ these in order:
 
 ---
 
-## 8. Context window note
+## 8. When BLAST hits return Species = N/A
+
+The `sscinames` BLAST column is sometimes absent from NCBI's index for newer
+assemblies. If the tool summary shows "N/A" in the Species column, retrieve the
+organism name via NCBI efetch using the accession ID from the hit table:
+
+```bash
+# Read the top accession from the saved results
+head -n 1 /workspace/scratch/blast_results.txt
+# e.g. → species_X    OZ346051.1    100.000 ...
+
+# Fetch the GenBank record — SOURCE: ORGANISM line has the species name
+curl -s "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=OZ346051.1&rettype=gb&retmode=text" | head -20
+```
+
+---
+
+## 9. When remote BLAST times out (rc=-1)
+
+If two successive BLAST calls both time out (rc=-1):
+
+1. **Try a different genomic region** — 16S rRNA contains multiple copies; try the
+   second occurrence instead of the first.
+2. **Use Bio.Blast.NCBIWWW.qblast()** — this uses the Python NCBI API which has a
+   separate timeout path from the `-remote` flag:
+   ```python
+   from Bio.Blast import NCBIWWW, NCBIXML
+   result_handle = NCBIWWW.qblast("blastn", "nt", query_seq)
+   records = list(NCBIXML.parse(result_handle))
+   top_hit = records[0].alignments[0].title if records[0].alignments else "No hits"
+   print(top_hit)
+   ```
+3. **Do NOT download a reference genome and run minimap2** — minimap2 alignment
+   percentage is not a species identity metric. A 21% divergence rate (minimap2 `de`
+   field) from E. coli does not mean the organism *is* E. coli.
+
+---
+
+## 10. Context window note
 
 Full tabular BLAST output is always saved to
 `/workspace/scratch/blast_results.txt` so you can re-inspect it without re-running.

@@ -886,3 +886,48 @@ grep -n "__new__(OpenAIProvider)\|__new__(AnthropicProvider)" tests/
 
 **Cross-reference:** §L-21 (AgentRun.__init__ coordination) — a similar class where new
 attributes added by one agent need the CI guard.
+
+---
+
+## L-31: When remote BLAST times out, use NCBI efetch — do NOT download a genome and run minimap2
+
+**Lesson (2026-05-29 — hb002 revalidation attempt 0):** When remote BLAST times out
+(rc=-1) twice in a row, the agent fell back to downloading the E. coli K-12 genome
+(~4.6 Mb), building a local BLAST database, running minimap2, and interpreting the
+alignment against E. coli as a species confirmation — concluding "Escherichia coli"
+for a genome that is actually *Bacillus licheniformis* (46% GC vs E. coli's 51%).
+
+**Why the fallback was wrong:** minimap2 alignment percentage (PAF `de` field) is an
+alignment *quality* metric, not a taxonomic identity metric. Any two bacteria of similar
+genome size will produce some alignment. The model saw a PAF output with mapped reads and
+inferred species identity — a category error. The actual identity came only from the BLAST
+hit accession fetched via NCBI efetch.
+
+**The correct fallback chain (in order):**
+1. **If BLAST succeeded but Species = N/A**: read `/workspace/scratch/blast_results.txt`
+   for the top accession ID and run `curl efetch` to get the GenBank record organism name:
+   ```bash
+   curl -s "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=<ACC>&rettype=gb&retmode=text" | head -20
+   ```
+2. **If BLAST timed out (rc=-1)**: try `Bio.Blast.NCBIWWW.qblast()` from within the
+   container — this uses the Python NCBI BLAST API which has a different timeout path
+   than the command-line `-remote` flag.
+3. **Never**: download a reference genome, build a local DB, and run minimap2 or local
+   blastn to "confirm" species. A 21% minimap2 divergence rate (`de:f:0.21`) does not
+   mean ~79% identity — it includes indels and structural variation that are meaningless
+   for species-level classification.
+
+**Detection in trajectories:** If an agent downloads a genome (`wget` + `*.fna`),
+builds a blast database, and then runs `minimap2 ... | tee alignment.bam`, it has
+likely fallen into this trap. The correct signal is `curl efetch` after a successful
+(even N/A-species) BLAST hit.
+
+**Root cause of attempt-0's timeout:** Remote NCBI BLAST server load varies by time
+of day; the 474 bp and 150 bp queries both hit the 600s per-command wall. Attempt-1 ran
+later and the same 500 bp query completed in ~210s. The blast-search SKILL.md's
+"Try a different region, not a larger one" guidance was present but the agent tried a
+smaller region (150 bp) rather than switching to the efetch fallback path after the
+first timeout.
+
+**Cross-reference:** §L-26 (bash pipeline exit codes silently swallowed) — both arise
+from misinterpreting tool output.

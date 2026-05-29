@@ -103,6 +103,14 @@ Never call a tool without this brief narration first.
     directly. It runs the query, saves full tabular results to
     `/workspace/scratch/blast_results.txt`, and returns a compact hit summary — keeping
     large BLAST outputs out of your context window.
+    If `blast_search` returns rc=-1 (network timeout) and
+    `/workspace/scratch/blast_results.txt` contains no hits, do not switch to
+    alternative alignment approaches (e.g. downloading a reference genome and running
+    minimap2 — alignment percentage is not a species identity metric). Instead:
+    (a) try `Bio.Blast.NCBIWWW.qblast()` via Python (Biopython is installed; see
+    `/workspace/skills/blast-search.md` §9 for the recipe), or
+    (b) `sleep 290` in bash (5 minutes, counts as one step) then retry with a ≤150 bp
+    query. Do not submit longer queries until a ≤150 bp probe succeeds.
 3c. **TF identification from ChIP-seq peaks.** To identify the transcription
     factor (or candidate TFs) responsible for a set of ChIP-seq peaks, extract
     the peak-flanking sequences with `bedtools getfasta` (typically ±100 bp

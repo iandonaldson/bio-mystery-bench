@@ -1436,6 +1436,11 @@ class TestSystemPromptMethodAdvice:
         assert "/workspace/skills/" in text
         assert "environment context" in text
 
+    def test_system_prompt_blast_timeout_fallback_mentions_qblast(self):
+        """System prompt §3b must guide agents to use qblast() on rc=-1 timeout."""
+        text = SYSTEM_PROMPT_PATH.read_text()
+        assert "NCBIWWW.qblast" in text
+
 
 # ---------------------------------------------------------------------------
 # Reference SKILL files  (GM-3, GM-4)
@@ -2027,7 +2032,8 @@ class TestSummarizeBlastOutputRcDispatch:
     def test_rc_negative_one_timeout(self):
         result = _summarize_blast_output("", rc=-1)
         assert "rc=-1" in result
-        assert "Timed out" in result or "timed out" in result.lower()
+        assert "Network stall" in result or "network stall" in result.lower()
+        assert "NCBIWWW.qblast" in result
         assert "No hits" not in result
 
     def test_rc_1_invalid_query(self):
