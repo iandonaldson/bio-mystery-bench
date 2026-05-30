@@ -1004,15 +1004,19 @@ Test count after merge: 190/190 passing in `tests/test_agent_helpers.py`; 393/39
 **Goal:** Full benchmark with gpt-oss-120b (Cerebras), `reasoning_effort=high`, two-round
 critic, across all three preview problems × 5 attempts. Compare to RERUN-6 (Qwen3) baseline.
 
-**Results (results/gpt-oss-rerun7-5x5/):**
+**Results (results/gpt-oss-rerun7-5x5/, all 5 preview problems):**
 
-| Problem | RERUN-6 (Qwen3) | RERUN-7 (gpt-oss-120b) | Analysis |
-|---------|-----------------|------------------------|----------|
-| hb002   | 0/5             | **5/5** ✅             | BLAST fixes (BT-1..5) fully eliminated timeout failures |
-| hb022   | 3/5             | 0/5 ❌                 | Model-level bias: picks wrong condition (Sample_09–16 vs correct Sample_01–08) |
-| hb053   | 0/5             | 0/5 ❌                 | Heat stress not identified; various wrong answers (pathogen/drought/phosphate) |
+| Problem | human_solvable | Correct | pass@1 | pass@5 |
+|---------|---------------|---------|--------|--------|
+| hb002   | True  | 5/5 | ✅ | ✅ |
+| hb020   | True  | 4/5 | ❌ | ✅ |
+| recqgsfxqqodhjens | True | 5/5 | ✅ | ✅ |
+| hb022   | False | 0/5 | ❌ | ❌ |
+| hb053   | False | 0/5 | ❌ | ❌ |
 
-Overall: pass@1=33.3%, pass@5=33.3%, brittle=0%, total_cost=$12.65.
+**pass@1=40%, pass@5=60%, brittle=0%.** Human-solvable: 3/3 problems solved, 14/15 attempts correct (93%).
+
+vs RERUN-6 (Qwen3, hb002/hb022/hb053 only): hb002 0→5, hb022 3→0, hb053 0→0.
 
 **hb022 failure analysis:** gpt-oss-120b consistently picks [Sample_09–16] (wrong). Correct
 answer is [Sample_01–08]. Agent correctly clusters samples into two groups but wrongly assigns

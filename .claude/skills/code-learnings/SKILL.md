@@ -970,15 +970,25 @@ error message and the system prompt (efetch will get its own SKILL file later).
 Full 5×5 benchmark (hb002/hb022/hb053, 5 attempts each, gpt-oss-120b,
 `reasoning_effort=high`, two-round critic) completed.
 
-**Results vs RERUN-6 (Qwen3/Cerebras) baseline:**
+**Results (all 5 preview problems):**
+
+| Problem | human_solvable | Correct | pass@1 | pass@5 | Notes |
+|---------|---------------|---------|--------|--------|-------|
+| hb002   | True  | 5/5 | ✅ | ✅ | BLAST fixes (BT-1..5) fully working |
+| hb020   | True  | 4/5 | ❌ | ✅ | Attempt 1: Pan troglodytes; attempts 2–5: Homo sapiens |
+| recq..  | True  | 5/5 | ✅ | ✅ | CTCF (ChIP-seq TF identification) |
+| hb022   | False | 0/5 | ❌ | ❌ | Model-level SLC7A11 bias (see below) |
+| hb053   | False | 0/5 | ❌ | ❌ | Various wrong stress types; correct: heat stress |
+
+pass@1=40%, pass@5=60%, brittle=0%. Human-solvable: 14/15 attempts correct (93%).
+
+**vs RERUN-6 (Qwen3/Cerebras, hb002/hb022/hb053 only):**
 
 | Problem | RERUN-6 | RERUN-7 | Change |
 |---------|---------|---------|--------|
 | hb002   | 0/5     | 5/5     | +5 (BLAST fixes working) |
 | hb022   | 3/5     | 0/5     | −3 (model-level bias, see below) |
 | hb053   | 0/5     | 0/5     | unchanged |
-
-pass@1=33.3%, pass@5=33.3%, total cost=$12.65.
 
 **hb002 (human_solvable=True):** Perfect 5/5. The BT-1..5 fixes (BLAST timeout remediation,
 qblast fallback, no-minimap2 rule) fully eliminated the BLAST failure mode that caused 0/5
