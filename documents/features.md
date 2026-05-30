@@ -996,3 +996,37 @@ Key distinction between two failure modes that must not be conflated:
 
 **New tests:** 2 (1 updated `test_rc_negative_one_timeout`, 1 new `test_system_prompt_blast_timeout_fallback_mentions_qblast`).
 Test count after merge: 190/190 passing in `tests/test_agent_helpers.py`; 393/394 overall.
+
+---
+
+## ✅ RERUN-7: Full 5×5 Benchmark Run (2026-05-29)
+
+**Goal:** Full benchmark with gpt-oss-120b (Cerebras), `reasoning_effort=high`, two-round
+critic, across all five preview problems × 5 attempts. Compare to RERUN-6 (Qwen3) baseline.
+Note: RERUN-6 only ran hb002/hb022/hb053; RERUN-7 adds hb020 and recqgsfxqqodhjens for the
+first time.
+
+**Results (results/gpt-oss-rerun7-5x5/, all 5 preview problems):**
+
+| Problem | human_solvable | Correct | pass@1 | pass@5 |
+|---------|---------------|---------|--------|--------|
+| hb002   | True  | 5/5 | ✅ | ✅ |
+| hb020   | True  | 4/5 | ❌ | ✅ |
+| recqgsfxqqodhjens | True | 5/5 | ✅ | ✅ |
+| hb022   | False | 0/5 | ❌ | ❌ |
+| hb053   | False | 0/5 | ❌ | ❌ |
+
+**pass@1=40%, pass@5=60%, brittle=0%.** Human-solvable: 3/3 problems solved, 14/15 attempts correct (93%).
+
+vs RERUN-6 (Qwen3, hb002/hb022/hb053 only): hb002 0→5, hb022 3→0, hb053 0→0.
+
+**hb022 failure analysis:** gpt-oss-120b consistently picks [Sample_09–16] (wrong). Correct
+answer is [Sample_01–08]. Agent correctly clusters samples into two groups but wrongly assigns
+SLC7A11 direction — assumes SLC7A11 should be *higher* in Erastin-treated cells; actual data shows
+it lower in the Erastin group. This is a model-level prior, not a harness bug. (hb022 is human_NOT_solvable.)
+
+**hb053 failure analysis:** Agent BLASTs scrubbed DEG FASTA sequences and identifies gene functions
+but fails to converge on heat stress. Varied wrong answers across 5 attempts. Step counts high (26–91);
+some attempts near the 100-step limit. (hb053 is human_NOT_solvable.)
+
+**L-33** added to code-learnings with full RERUN-7 results and failure analyses.

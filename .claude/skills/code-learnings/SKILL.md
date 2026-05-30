@@ -960,3 +960,88 @@ rc=-1 message to point to `qblast()` and removed the efetch suggestion from both
 error message and the system prompt (efetch will get its own SKILL file later).
 
 **Cross-reference:** §L-31 (do NOT use minimap2 for species identification).
+
+---
+
+## L-33: RERUN-7 (gpt-oss-120b, 5×5) — BLAST fixes vindicated; hb022 model-level bias
+
+**Lesson (2026-05-29 — RERUN-7, results/gpt-oss-rerun7-5x5/):**
+
+Full 5×5 benchmark (hb002/hb022/hb053, 5 attempts each, gpt-oss-120b,
+`reasoning_effort=high`, two-round critic) completed.
+
+**Results (all 5 preview problems):**
+
+| Problem | human_solvable | Correct | pass@1 | pass@5 | Notes |
+|---------|---------------|---------|--------|--------|-------|
+| hb002   | True  | 5/5 | ✅ | ✅ | BLAST fixes (BT-1..5) fully working |
+| hb020   | True  | 4/5 | ❌ | ✅ | Attempt 1: Pan troglodytes; attempts 2–5: Homo sapiens |
+| recq..  | True  | 5/5 | ✅ | ✅ | CTCF (ChIP-seq TF identification) |
+| hb022   | False | 0/5 | ❌ | ❌ | Model-level SLC7A11 bias (see below) |
+| hb053   | False | 0/5 | ❌ | ❌ | Various wrong stress types; correct: heat stress |
+
+pass@1=40%, pass@5=60%, brittle=0%. Human-solvable: 14/15 attempts correct (93%).
+
+**vs RERUN-6 (Qwen3/Cerebras, hb002/hb022/hb053 only):**
+
+| Problem | RERUN-6 | RERUN-7 | Change |
+|---------|---------|---------|--------|
+| hb002   | 0/5     | 5/5     | +5 (BLAST fixes working) |
+| hb022   | 3/5     | 0/5     | −3 (model-level bias, see below) |
+| hb053   | 0/5     | 0/5     | unchanged |
+
+**hb002 (human_solvable=True):** Perfect 5/5. The BT-1..5 fixes (BLAST timeout remediation,
+qblast fallback, no-minimap2 rule) fully eliminated the BLAST failure mode that caused 0/5
+in RERUN-6. Attempt times ranged 136–803 s (2–13 min); BLAST is completing within the
+per-command timeout.
+
+**hb022 (human_NOT_solvable=False) — systematic wrong-half bias in gpt-oss-120b:**
+All 5 attempts predicted [Sample_09–16]; correct answer is [Sample_01–08]. The agent
+correctly clusters the 16 samples into two groups but assigns the wrong cluster as
+"Erastin-treated." The bias stems from how the model interprets SLC7A11 expression
+direction: it assumes SLC7A11 should be *higher* in Erastin-treated cells (compensatory
+upregulation hypothesis), but Sample_01–08 actually have *lower* SLC7A11-AS1 expression
+(≈ −0.3 to −1.9), which is the correct Erastin signature. Sample_09–16 have higher
+SLC7A11 expression (~+0.3 to +0.6) and are the control group. RERUN-6/Qwen3 got 3/5
+correct, suggesting this is a model-level knowledge difference, not a harness issue.
+Since hb022 is "human_NOT_solvable", no harness fix is warranted.
+
+**hb053 (human_NOT_solvable=False):** Agent BLASTs the scrubbed FASTA sequences, identifies
+gene functions, but consistently assigns wrong stress types (pathogen, drought, phosphate
+starvation). Correct answer is "heat stress". Step counts high (26–91 steps per attempt).
+Consistent failure across 5 attempts with different wrong answers suggests the agent is
+finding some genes enriched for other stress responses and failing to weight HSP/heat-stress
+markers correctly. No harness fix is warranted; this is a knowledge/reasoning limitation.
+
+---
+
+## L-34: Cerebras run_eval.py CLI flags — three gotchas
+
+**Lesson (2026-05-30 — RERUN-7 launch):** Three flag errors hit in quick succession when
+launching the RERUN-7 benchmark run via `run_eval.py`:
+
+1. **`--problems` does not exist** — the flag is `--problem-ids`.
+2. **`--attempts` does not exist** — the flag is `--n-attempts`.
+3. **`--problem-ids` is comma-separated, not space-separated** — passing multiple IDs
+   space-separated (e.g. `--problem-ids hb002 hb022`) raises "Got unexpected extra arguments";
+   the correct form is `--problem-ids hb002,hb022,hb053`.
+4. **Cerebras API key is not auto-discovered** — the `openai` provider looks for
+   `OPENAI_API_KEY` in the environment, but Cerebras uses `CEREBRAS_API_KEY`.
+   Always pass `--api-key "$CEREBRAS_API_KEY"` explicitly when using Cerebras.
+
+**Correct Cerebras invocation:**
+```bash
+set -a && source .env && set +a && echo "y" | python3.12 scripts/run_eval.py \
+  --problem-ids hb002,hb022,hb053 \
+  --n-attempts 5 \
+  --provider openai \
+  --model gpt-oss-120b \
+  --api-base-url https://api.cerebras.ai/v1 \
+  --api-key "$CEREBRAS_API_KEY" \
+  --reasoning-effort high \
+  --critic-injection-points after_final_answer \
+  --critic-injection-points after_critic_response \
+  --results-dir results/<output-dir>
+```
+
+**Rule:** When in doubt, run `python3.12 scripts/run_eval.py --help` first to verify flag names.
