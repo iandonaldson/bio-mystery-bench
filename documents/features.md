@@ -1002,7 +1002,9 @@ Test count after merge: 190/190 passing in `tests/test_agent_helpers.py`; 393/39
 ## ✅ RERUN-7: Full 5×5 Benchmark Run (2026-05-29)
 
 **Goal:** Full benchmark with gpt-oss-120b (Cerebras), `reasoning_effort=high`, two-round
-critic, across all three preview problems × 5 attempts. Compare to RERUN-6 (Qwen3) baseline.
+critic, across all five preview problems × 5 attempts. Compare to RERUN-6 (Qwen3) baseline.
+Note: RERUN-6 only ran hb002/hb022/hb053; RERUN-7 adds hb020 and recqgsfxqqodhjens for the
+first time.
 
 **Results (results/gpt-oss-rerun7-5x5/, all 5 preview problems):**
 

@@ -1012,3 +1012,36 @@ starvation). Correct answer is "heat stress". Step counts high (26–91 steps pe
 Consistent failure across 5 attempts with different wrong answers suggests the agent is
 finding some genes enriched for other stress responses and failing to weight HSP/heat-stress
 markers correctly. No harness fix is warranted; this is a knowledge/reasoning limitation.
+
+---
+
+## L-34: Cerebras run_eval.py CLI flags — three gotchas
+
+**Lesson (2026-05-30 — RERUN-7 launch):** Three flag errors hit in quick succession when
+launching the RERUN-7 benchmark run via `run_eval.py`:
+
+1. **`--problems` does not exist** — the flag is `--problem-ids`.
+2. **`--attempts` does not exist** — the flag is `--n-attempts`.
+3. **`--problem-ids` is comma-separated, not space-separated** — passing multiple IDs
+   space-separated (e.g. `--problem-ids hb002 hb022`) raises "Got unexpected extra arguments";
+   the correct form is `--problem-ids hb002,hb022,hb053`.
+4. **Cerebras API key is not auto-discovered** — the `openai` provider looks for
+   `OPENAI_API_KEY` in the environment, but Cerebras uses `CEREBRAS_API_KEY`.
+   Always pass `--api-key "$CEREBRAS_API_KEY"` explicitly when using Cerebras.
+
+**Correct Cerebras invocation:**
+```bash
+set -a && source .env && set +a && echo "y" | python3.12 scripts/run_eval.py \
+  --problem-ids hb002,hb022,hb053 \
+  --n-attempts 5 \
+  --provider openai \
+  --model gpt-oss-120b \
+  --api-base-url https://api.cerebras.ai/v1 \
+  --api-key "$CEREBRAS_API_KEY" \
+  --reasoning-effort high \
+  --critic-injection-points after_final_answer \
+  --critic-injection-points after_critic_response \
+  --results-dir results/<output-dir>
+```
+
+**Rule:** When in doubt, run `python3.12 scripts/run_eval.py --help` first to verify flag names.

@@ -1,7 +1,11 @@
 # Agent Progress Log
 
 ## Last updated
-2026-05-30 — RERUN-7: Full 5×5 benchmark run (all 5 preview problems, gpt-oss-120b,
+2026-05-30 — Close-session for RERUN-7. Walkthrough 18 written; L-33 (results) and L-34
+(CLI flag gotchas) added to code-learnings. features.md and README References updated.
+Run command flags corrected in Notes for next agent session.
+
+Previous: 2026-05-30 — RERUN-7: Full 5×5 benchmark run (all 5 preview problems, gpt-oss-120b,
 reasoning_effort=high, two-round critic). Results in results/gpt-oss-rerun7-5x5/.
 pass@1=40%, pass@5=60%, brittle=0%. Human-solvable: 3/3 solved (14/15 attempts correct).
 hb022/hb053 (human_NOT_solvable): 0/10.
@@ -183,19 +187,22 @@ Walkthroughs in documents/code_walkthroughs/:
 - 15.blast_plans_improvement.md — BLAST rc diagnostics, sscinames, rate limiting (BP-1..5)
 - 16.bt4_rv4_blast_timeout_reasoning_visibility.md — BLAST timeout remediation + gpt-oss-120b reasoning (BT-1..4, RV-1..4)
 - 17.bt5_blast_timeout_fallback.md — BLAST timeout fallback guidance: qblast(), no-minimap2 rule (BT-5, PR #91)
+- 18.rerun7_full_5x5_benchmark.md — RERUN-7 results: gpt-oss-120b 5×5, all 5 preview problems, failure analysis
 
 ## Next steps (in priority order)
 1. ✅ Merge PR #89 (BT-1..4 + RV-1..4) — done (PR #90 close-session also merged).
 2. ✅ hb002 re-validation — done (results/gpt-oss-hb002-revalidation/, pass@3=100%).
 3. ✅ BT-5: BLAST timeout fallback guidance — done (PR #91 merged 2026-05-29).
-4. Full 5×5 benchmark run: hb002/hb022/hb053, 5 attempts each, gpt-oss-120b (see Pending slices).
-5. taxdb in Dockerfile: prevents taxid hallucination in hb002-style problems (user deferred).
-6. CI guard: AST-based test that asserts every `self.X` read in `AgentRun._loop` has a matching
+4. ✅ RERUN-7: Full 5×5 benchmark — all 5 preview problems × 5 attempts (results/gpt-oss-rerun7-5x5/).
+5. Investigate hb022 failure: can harness guidance correct gpt-oss-120b SLC7A11-direction bias?
+   (hb022 is human_NOT_solvable, but RERUN-6/Qwen3 got 3/5 — worth a targeted prompt experiment)
+6. taxdb in Dockerfile: prevents taxid hallucination in hb002-style problems (user deferred).
+7. CI guard: AST-based test that asserts every `self.X` read in `AgentRun._loop` has a matching
    `self.X = …` initialiser in `AgentRun.__init__` (see L-21).
-7. Curated tool wrappers: DESeq2, STAR, featureCounts SKILL files + Docker integration.
-8. Full dataset (99 problems): requires HuggingFace approval + Azure VM setup
+8. Curated tool wrappers: DESeq2, STAR, featureCounts SKILL files + Docker integration.
+9. Full dataset (99 problems): requires HuggingFace approval + Azure VM setup
    (see documents/scaling_with_azure.md).
-9. Groq Dev Tier upgrade: unavailable since ~Apr 2026, no ETA.
+10. Groq Dev Tier upgrade: unavailable since ~Apr 2026, no ETA.
 
 ## Blockers / open questions for human
 - taxdb: user deferred ("Not yet") — confirm before implementing.
