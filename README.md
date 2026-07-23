@@ -3,22 +3,24 @@
 > This public version of the repo is associated with a blog article about agentic AI coding practices around early 2026.
 > See https://blog.recursivehuman.com/p/agentic-programming-in-practice-part-1
 > The contents represent the state of the code at the end of the described 60 hr mark and will not be updated.
->
+>  
 > The initial instance of the repo created after 2 hours was accomplished using Claude Code (Sonnet 5) and the prompt provided in the blog.
-> The documents/product_description.md was created along with the first instance of the code.
-> All code generated after this first instance was after a coding harness was introduced including:
-> CLAUDE.md
-> claude-progress.txt
-> documents/features.md
-> SKILLS were added throughout the project to aid in coding and documentation including:
-> .claude/skills/* and
-> documents/code_walkthroughs
-> I would recommend introducing all elements of the harness plus the product description before starting any coding (not the way I did it here which was an experiment).  I usually engage both Claude and ChatGPT during my development of the product description.
-> Both features.md and claude-progress.txt are useful if you want to follow the development of the project through time.
-> The code walkthroughs begin with code_flow.md (which describes an early version of the code) followed by walkthroughs 2 to 18 (each one describing an additional layer of code added during a session).
->
+>   
+> The documents/product_description.md was created along with the first instance of the code.  
+> All code generated after this first instance was after a **coding harness** was introduced including:  
+> - CLAUDE.md  
+> - claude-progress.txt  
+> - documents/features.md  
+> SKILLS were added throughout the project to aid in coding and documentation including:  
+> - .claude/skills/* and  
+> - documents/code_walkthroughs  
+> I would **recommend** introducing all elements of the harness plus the product description before starting any coding (not the way I did it here which was an experiment).  
+> I usually engage both Claude and ChatGPT during my development of the product description.  
+> Both features.md and claude-progress.txt are useful if you want to follow the development of the project through time.  
+> The code walkthroughs begin with code_flow.md (which describes an early version of the code) followed by walkthroughs 2 to 18 (each one describing an additional layer of code added during a session).  
+>  
 > The coding harness is not to be confused with the bio-mystery-bench harness which is the ReAct loop attempting to answer questions and in encoded in /harness, /SKILLS, and /prompts.
-> 
+>   
 
   
 A self-contained harness for running the [Anthropic BioMysteryBench](https://www.anthropic.com/research/Evaluating-Claude-For-Bioinformatics-With-BioMysteryBench) benchmark locally.
