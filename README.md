@@ -7,7 +7,7 @@ An LLM acts as a ReAct agent, autonomously executing bioinformatics analyses ins
 > ## Nota bene
 > This public version of the repo is associated with a blog article about agentic AI coding practices around early 2026.
 > See https://blog.recursivehuman.com/p/agentic-programming-in-practice-part-1
-> The contents represent the state of the code at the end of the described 60 hr mark and will not be updated.
+> The contents represent the state of the code at the end of the described 60 hr mark and will not be updated.  If you are intersted in continuing development through a private or community version, please get in touch.
 >  
 > The initial instance of the repo created after 2 hours was accomplished using Claude Code (Sonnet 5) and the prompt provided in the blog. The documents/product_description.md was created along with the first instance of the code.
 >   
