@@ -7,7 +7,7 @@
   
 A self-contained harness for running the [Anthropic BioMysteryBench](https://www.anthropic.com/research/Evaluating-Claude-For-Bioinformatics-With-BioMysteryBench) benchmark locally.
 
-An LLM acts as a ReACT agent, autonomously executing bioinformatics analyses inside a Docker container to solve 99 expert-authored mystery problems. The harness records full trajectories and scores final answers. Multiple LLM providers are supported: Anthropic (Claude), Groq, Azure AI Foundry, Cerebras, Ollama (local), and any OpenAI-compatible endpoint.
+An LLM acts as a ReAct agent, autonomously executing bioinformatics analyses inside a Docker container to solve 99 expert-authored mystery problems. The harness records full trajectories and scores final answers. Multiple LLM providers are supported: Anthropic (Claude), Groq, Azure AI Foundry, Cerebras, Ollama (local), and any OpenAI-compatible endpoint.
 
 ## Quick Start
 
