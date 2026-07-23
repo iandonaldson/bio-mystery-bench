@@ -4,9 +4,8 @@
 > See https://blog.recursivehuman.com/p/agentic-programming-in-practice-part-1
 > The contents represent the state of the code at the end of the described 60 hr mark and will not be updated.
 >  
-> The initial instance of the repo created after 2 hours was accomplished using Claude Code (Sonnet 5) and the prompt provided in the blog.
+> The initial instance of the repo created after 2 hours was accomplished using Claude Code (Sonnet 5) and the prompt provided in the blog. The documents/product_description.md was created along with the first instance of the code.
 >   
-> The documents/product_description.md was created along with the first instance of the code.  
 > All code generated after this first instance was after a **coding harness** was introduced including:  
 > - CLAUDE.md  
 > - claude-progress.txt  
