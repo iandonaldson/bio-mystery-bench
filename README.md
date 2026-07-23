@@ -1,5 +1,10 @@
 # BioMysteryBench Evaluation Harness
 
+> This public version of the repo is associated with a blog article about agentic AI coding practices around early 2026.
+> See https://blog.recursivehuman.com/p/agentic-programming-in-practice-part-1
+> The contents represent the state of the code at the end of the described 60 hr mark and will not be updated.  
+
+  
 A self-contained harness for running the [Anthropic BioMysteryBench](https://www.anthropic.com/research/Evaluating-Claude-For-Bioinformatics-With-BioMysteryBench) benchmark locally.
 
 An LLM acts as a ReACT agent, autonomously executing bioinformatics analyses inside a Docker container to solve 99 expert-authored mystery problems. The harness records full trajectories and scores final answers. Multiple LLM providers are supported: Anthropic (Claude), Groq, Azure AI Foundry, Cerebras, Ollama (local), and any OpenAI-compatible endpoint.
